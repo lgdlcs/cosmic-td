@@ -53,6 +53,16 @@ interface LeakEffect {
   alpha: number;
 }
 
+interface ShopFlashEffect {
+  slotIndex: number;
+  alpha: number;
+}
+
+interface GridHover {
+  position: GridPos;
+  valid: boolean;
+}
+
 // ═══════════════════════════════════════════════════════
 
 export class GameScene extends Phaser.Scene {
@@ -71,19 +81,27 @@ export class GameScene extends Phaser.Scene {
   private deathEffects: DeathEffect[] = [];
   private damageTexts: DamageText[] = [];
   private leakEffects: LeakEffect[] = [];
+  private shopFlashEffects: ShopFlashEffect[] = [];
 
   // Tower flash (instanceId → remaining ms)
   private towerFlash: Map<string, number> = new Map();
+
+  // Shop/Bench interaction state
+  private selectedBenchIndex: number = -1; // -1 = none selected, 0+ = bench index
+  private gridHover: GridHover | null = null;
+  private hoveredTower: string | null = null; // instanceId of hovered tower
 
   // UI
   private uiTopLeft!: Phaser.GameObjects.Text;
   private uiTopRight!: Phaser.GameObjects.Text;
   private uiShopSlots: Phaser.GameObjects.Text[] = [];
   private uiSynergy!: Phaser.GameObjects.Text;
-  private uiBench!: Phaser.GameObjects.Text;
+  private uiBenchSlots: Phaser.GameObjects.Text[] = [];
+  private uiBenchLabel!: Phaser.GameObjects.Text;
   private uiOpponents: Phaser.GameObjects.Text[] = [];
   private uiHex!: Phaser.GameObjects.Text;
   private uiMobCount!: Phaser.GameObjects.Text;
+  private uiTowerHoverInfo!: Phaser.GameObjects.Text;
 
   // Timer
   private localTimer = 0;
@@ -112,18 +130,27 @@ export class GameScene extends Phaser.Scene {
     this.deathEffects = [];
     this.damageTexts = [];
     this.leakEffects = [];
+    this.shopFlashEffects = [];
     this.towerFlash.clear();
+    this.selectedBenchIndex = -1;
+    this.gridHover = null;
+    this.hoveredTower = null;
 
     this.drawGrid();
     this.createUI();
 
-    // Grid click
+    // Grid click and hover
     this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
       const col = Math.floor((ptr.x - GRID_X) / CELL);
       const row = Math.floor((ptr.y - GRID_Y) / CELL);
       if (col >= 0 && col < GRID_SIZE && row >= 0 && row < GRID_SIZE) {
         this.onGridClick({ row, col });
       }
+    });
+
+    this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => {
+      this.updateGridHover(ptr);
+      this.updateTowerHover(ptr);
     });
 
     this.msgHandler = (msg) => this.handleMsg(msg);
@@ -142,9 +169,11 @@ export class GameScene extends Phaser.Scene {
     this.updateDamageTexts(delta);
     this.updateLeakEffects(delta);
     this.updateTowerFlash(delta);
+    this.updateShopFlashEffects(delta);
 
     this.drawTowers();
     this.drawMobs();
+    this.drawGridPreview();
     this.drawFX();
 
     // Update mob count during combat
@@ -181,8 +210,18 @@ export class GameScene extends Phaser.Scene {
       case 'SHOP_UPDATE': {
         const me = this.me();
         if (me) {
+          // Check for shop slot changes to trigger flash effect
+          const oldShop = me.shop.slice();
           me.shop = msg.shop;
           me.gold = msg.gold;
+          
+          // Find slots that became empty (purchased)
+          for (let i = 0; i < 5; i++) {
+            if (oldShop[i] && !msg.shop[i]) {
+              this.triggerShopFlash(i);
+            }
+          }
+          
           this.updateUI();
         }
         break;
@@ -329,6 +368,104 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private updateShopFlashEffects(dt: number) {
+    const dtSec = dt / 1000;
+    for (const flash of this.shopFlashEffects) {
+      flash.alpha -= 2.5 * dtSec;
+    }
+    this.shopFlashEffects = this.shopFlashEffects.filter(f => f.alpha > 0);
+  }
+
+  private triggerShopFlash(slotIndex: number) {
+    this.shopFlashEffects.push({ slotIndex, alpha: 1 });
+  }
+
+  private updateGridHover(ptr: Phaser.Input.Pointer) {
+    if (this.gameState.phase !== 'shopping') {
+      this.gridHover = null;
+      return;
+    }
+
+    const col = Math.floor((ptr.x - GRID_X) / CELL);
+    const row = Math.floor((ptr.y - GRID_Y) / CELL);
+    
+    if (col >= 0 && col < GRID_SIZE && row >= 0 && row < GRID_SIZE && this.selectedBenchIndex >= 0) {
+      const position = { row, col };
+      const me = this.me();
+      const isPath = isPathCell(this.mapDef, position);
+      const isOccupied = me?.towers.some(t => t.position.row === row && t.position.col === col);
+      const valid = !isPath && !isOccupied;
+      
+      this.gridHover = { position, valid };
+    } else {
+      this.gridHover = null;
+    }
+  }
+
+  private updateTowerHover(ptr: Phaser.Input.Pointer) {
+    if (this.gameState.phase !== 'shopping') {
+      this.hoveredTower = null;
+      this.uiTowerHoverInfo.setText('');
+      return;
+    }
+
+    const col = Math.floor((ptr.x - GRID_X) / CELL);
+    const row = Math.floor((ptr.y - GRID_Y) / CELL);
+    
+    if (col >= 0 && col < GRID_SIZE && row >= 0 && row < GRID_SIZE) {
+      const me = this.me();
+      const tower = me?.towers.find(t => t.position.row === row && t.position.col === col);
+      
+      if (tower) {
+        this.hoveredTower = tower.instanceId;
+        const def = TOWER_MAP[tower.defId];
+        if (def) {
+          const sellPrice = Math.floor(def.cost * 0.6); // 60% sell value
+          this.uiTowerHoverInfo.setText(`💰 Sell for ${sellPrice}g`);
+        }
+      } else {
+        this.hoveredTower = null;
+        this.uiTowerHoverInfo.setText('');
+      }
+    } else {
+      this.hoveredTower = null;
+      this.uiTowerHoverInfo.setText('');
+    }
+  }
+
+  private drawGridPreview() {
+    // Clear previous preview
+    this.gridGfx.lineStyle(0, 0);
+    
+    if (this.gridHover && this.selectedBenchIndex >= 0) {
+      const x = GRID_X + this.gridHover.position.col * CELL;
+      const y = GRID_Y + this.gridHover.position.row * CELL;
+      
+      if (this.gridHover.valid) {
+        this.gridGfx.fillStyle(0x44ff44, 0.3);
+        this.gridGfx.lineStyle(2, 0x44ff44, 0.8);
+      } else {
+        this.gridGfx.fillStyle(0xff4444, 0.3);
+        this.gridGfx.lineStyle(2, 0xff4444, 0.8);
+      }
+      
+      this.gridGfx.fillRect(x, y, CELL, CELL);
+      this.gridGfx.strokeRect(x, y, CELL, CELL);
+    }
+
+    // Highlight hovered tower for selling
+    if (this.hoveredTower) {
+      const me = this.me();
+      const tower = me?.towers.find(t => t.instanceId === this.hoveredTower);
+      if (tower) {
+        const x = GRID_X + tower.position.col * CELL;
+        const y = GRID_Y + tower.position.row * CELL;
+        this.gridGfx.lineStyle(2, 0xffd93d, 0.6);
+        this.gridGfx.strokeRect(x, y, CELL, CELL);
+      }
+    }
+  }
+
   // ── Draw FX Layer ─────────────────────────────────────
 
   private drawFX() {
@@ -356,6 +493,18 @@ export class GameScene extends Phaser.Scene {
     for (const l of this.leakEffects) {
       this.fxGfx.fillStyle(0xff0000, l.alpha * 0.4);
       this.fxGfx.fillCircle(l.x, l.y, 30);
+    }
+
+    // Shop flash effects
+    for (const flash of this.shopFlashEffects) {
+      const slot = this.uiShopSlots[flash.slotIndex];
+      if (slot) {
+        const bounds = slot.getBounds();
+        this.fxGfx.fillStyle(0xffd93d, flash.alpha * 0.3);
+        this.fxGfx.fillRect(bounds.x - 4, bounds.y - 4, bounds.width + 8, bounds.height + 8);
+        this.fxGfx.lineStyle(2, 0xffd93d, flash.alpha);
+        this.fxGfx.strokeRect(bounds.x - 4, bounds.y - 4, bounds.width + 8, bounds.height + 8);
+      }
     }
   }
 
@@ -680,10 +829,32 @@ export class GameScene extends Phaser.Scene {
       fontSize: '12px', color: '#aaa',
     }).setDepth(5);
 
-    // Bench
-    this.uiBench = this.add.text(GRID_X, shopY + 80, '', {
-      fontSize: '12px', color: '#ccc',
+    // Bench label and slots
+    this.uiBenchLabel = this.add.text(GRID_X, shopY + 80, 'BENCH (click to select)', {
+      fontSize: '11px', color: '#666', fontStyle: 'bold',
     }).setDepth(5);
+
+    // Create 8 bench slots
+    for (let i = 0; i < 8; i++) {
+      const x = GRID_X + (i % 4) * 130;
+      const y = shopY + 96 + Math.floor(i / 4) * 28;
+      const txt = this.add.text(x, y, '', {
+        fontSize: '11px', color: '#ccc',
+        backgroundColor: '#2a2a4a',
+        padding: { x: 4, y: 3 },
+        fixedWidth: 125,
+        wordWrap: { width: 115 },
+      })
+        .setDepth(5)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => this.selectBenchSlot(i));
+      this.uiBenchSlots.push(txt);
+    }
+
+    // Tower hover info
+    this.uiTowerHoverInfo = this.add.text(GRID_X + GRID_PX, GRID_Y + GRID_PX - 20, '', {
+      fontSize: '12px', color: '#ffd93d',
+    }).setOrigin(1, 0).setDepth(5);
   }
 
   private updateUI() {
@@ -719,16 +890,30 @@ export class GameScene extends Phaser.Scene {
     }
     this.uiSynergy.setText(`Synergies: ${parts.join('  ') || 'none yet'}`);
 
-    // Bench
-    if (me.bench.length > 0) {
-      const benchNames = me.bench.map((id) => {
-        const def = TOWER_MAP[id];
-        return def ? `${ELEMENT_SYMBOLS[def.elements[0]]} ${def.name}` : id;
-      });
-      this.uiBench.setText(`Bench (${me.bench.length}/8): ${benchNames.join(', ')}`);
-    } else {
-      this.uiBench.setText('Bench: empty — buy from shop');
+    // Bench slots
+    for (let i = 0; i < 8; i++) {
+      const defId = me.bench[i];
+      const isSelected = this.selectedBenchIndex === i;
+      
+      if (defId) {
+        const def = TOWER_MAP[defId];
+        if (def) {
+          const elems = def.elements.map(e => ELEMENT_SYMBOLS[e]).join('');
+          this.uiBenchSlots[i]
+            .setText(`${elems} ${def.name}`)
+            .setColor(isSelected ? '#ffd93d' : (ELEMENT_COLORS[def.elements[0]] || '#ccc'))
+            .setBackgroundColor(isSelected ? '#4a4a0a' : '#2a2a4a');
+        }
+      } else {
+        this.uiBenchSlots[i]
+          .setText('—')
+          .setColor('#666')
+          .setBackgroundColor('#2a2a4a');
+      }
     }
+
+    // Update bench label
+    this.uiBenchLabel.setText(`BENCH (${me.bench.length}/8) ${this.selectedBenchIndex >= 0 ? '— Click grid to place' : '— Click slot to select'}`);
 
     // Opponents
     const opponents = this.gameState.players.filter((p) => p.id !== this.myId);
@@ -770,10 +955,37 @@ export class GameScene extends Phaser.Scene {
   private onGridClick(pos: GridPos) {
     if (this.gameState.phase !== 'shopping') return;
     const me = this.me();
-    if (!me || me.bench.length === 0) return;
+    if (!me) return;
+
+    // Check if clicking on a tower to sell it
+    const existingTower = me.towers.find(t => t.position.row === pos.row && t.position.col === pos.col);
+    if (existingTower) {
+      socket.send({ type: 'SELL_TOWER', instanceId: existingTower.instanceId });
+      return;
+    }
+
+    // Check if trying to place a tower
+    if (this.selectedBenchIndex < 0 || !me.bench[this.selectedBenchIndex]) return;
     if (isPathCell(this.mapDef, pos)) return;
-    if (me.towers.some((t) => t.position.row === pos.row && t.position.col === pos.col)) return;
-    socket.send({ type: 'PLACE_TOWER', benchIndex: 0, position: pos });
+    
+    socket.send({ 
+      type: 'PLACE_TOWER', 
+      benchIndex: this.selectedBenchIndex, 
+      position: pos 
+    });
+    
+    // Deselect after placement
+    this.selectedBenchIndex = -1;
+    this.updateUI();
+  }
+
+  private selectBenchSlot(index: number) {
+    if (this.gameState.phase !== 'shopping') return;
+    const me = this.me();
+    if (!me || !me.bench[index]) return;
+    
+    this.selectedBenchIndex = this.selectedBenchIndex === index ? -1 : index;
+    this.updateUI();
   }
 
   private me(): PlayerState | undefined {
