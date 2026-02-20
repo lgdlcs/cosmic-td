@@ -118,6 +118,7 @@ export class GameScene extends Phaser.Scene {
 
   // Graphics layers
   private gridGfx!: Phaser.GameObjects.Graphics;
+  private previewGfx!: Phaser.GameObjects.Graphics;
   private towerGfx!: Phaser.GameObjects.Graphics;
   private mobGfx!: Phaser.GameObjects.Graphics;
   private fxGfx!: Phaser.GameObjects.Graphics;
@@ -170,6 +171,7 @@ export class GameScene extends Phaser.Scene {
 
   create() {
     this.gridGfx = this.add.graphics().setDepth(0);
+    this.previewGfx = this.add.graphics().setDepth(0.5);
     this.towerGfx = this.add.graphics().setDepth(1);
     this.mobGfx = this.add.graphics().setDepth(2);
     this.fxGfx = this.add.graphics().setDepth(3);
@@ -541,8 +543,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private drawGridPreview() {
-    // Clear previous preview
-    this.gridGfx.lineStyle(0, 0);
+    // Clear preview layer every frame
+    this.previewGfx.clear();
     
     if (this.gridHover && this.selectedShopIndex >= 0 && this.selectedTowerDefId) {
       const x = GRID_X + this.gridHover.position.col * CELL;
@@ -552,15 +554,15 @@ export class GameScene extends Phaser.Scene {
       
       // Draw preview cell background
       if (this.gridHover.valid) {
-        this.gridGfx.fillStyle(0x44ff44, 0.3);
-        this.gridGfx.lineStyle(2, 0x44ff44, 0.8);
+        this.previewGfx.fillStyle(0x44ff44, 0.3);
+        this.previewGfx.lineStyle(2, 0x44ff44, 0.8);
       } else {
-        this.gridGfx.fillStyle(0xff4444, 0.3);
-        this.gridGfx.lineStyle(2, 0xff4444, 0.8);
+        this.previewGfx.fillStyle(0xff4444, 0.3);
+        this.previewGfx.lineStyle(2, 0xff4444, 0.8);
       }
       
-      this.gridGfx.fillRect(x, y, CELL, CELL);
-      this.gridGfx.strokeRect(x, y, CELL, CELL);
+      this.previewGfx.fillRect(x, y, CELL, CELL);
+      this.previewGfx.strokeRect(x, y, CELL, CELL);
       
       // Draw tower preview
       const def = TOWER_MAP[this.selectedTowerDefId];
@@ -571,37 +573,37 @@ export class GameScene extends Phaser.Scene {
         const size = 20;
         
         // Semi-transparent tower preview
-        this.gridGfx.fillStyle(elemColor, 0.6);
+        this.previewGfx.fillStyle(elemColor, 0.6);
         const elem = def.elements[0];
         
         // Draw tower shape based on element
         switch (elem) {
           case 'fire':
-            this.gridGfx.fillTriangle(cx, cy - size, cx - size * 0.8, cy + size * 0.6, cx + size * 0.8, cy + size * 0.6);
+            this.previewGfx.fillTriangle(cx, cy - size, cx - size * 0.8, cy + size * 0.6, cx + size * 0.8, cy + size * 0.6);
             break;
           case 'water':
-            this.gridGfx.fillTriangle(cx, cy + size, cx - size * 0.8, cy - size * 0.6, cx + size * 0.8, cy - size * 0.6);
+            this.previewGfx.fillTriangle(cx, cy + size, cx - size * 0.8, cy - size * 0.6, cx + size * 0.8, cy - size * 0.6);
             break;
           case 'earth':
-            this.gridGfx.fillRect(cx - size * 0.7, cy - size * 0.7, size * 1.4, size * 1.4);
+            this.previewGfx.fillRect(cx - size * 0.7, cy - size * 0.7, size * 1.4, size * 1.4);
             break;
           case 'wind':
-            this.gridGfx.fillTriangle(cx, cy - size, cx + size, cy, cx, cy + size);
-            this.gridGfx.fillTriangle(cx, cy - size, cx - size, cy, cx, cy + size);
+            this.previewGfx.fillTriangle(cx, cy - size, cx + size, cy, cx, cy + size);
+            this.previewGfx.fillTriangle(cx, cy - size, cx - size, cy, cx, cy + size);
             break;
           case 'light':
-            this.gridGfx.fillCircle(cx, cy, size * 0.8);
+            this.previewGfx.fillCircle(cx, cy, size * 0.8);
             break;
           case 'dark':
-            this.gridGfx.fillCircle(cx, cy, size);
+            this.previewGfx.fillCircle(cx, cy, size);
             break;
           default:
-            this.gridGfx.fillCircle(cx, cy, size);
+            this.previewGfx.fillCircle(cx, cy, size);
         }
         
         // Show range preview
-        this.gridGfx.lineStyle(1, elemColor, 0.2);
-        this.gridGfx.strokeCircle(cx, cy, def.range * CELL);
+        this.previewGfx.lineStyle(1, elemColor, 0.2);
+        this.previewGfx.strokeCircle(cx, cy, def.range * CELL);
       }
     }
 
