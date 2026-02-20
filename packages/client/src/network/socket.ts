@@ -1,0 +1,59 @@
+import type { ClientMsg, ServerMsg } from '@ect/shared';
+
+type MsgHandler = (msg: ServerMsg) => void;
+
+class GameSocket {
+  private ws: WebSocket | null = null;
+  private handlers: MsgHandler[] = [];
+  private url: string;
+
+  constructor() {
+    const host = window.location.hostname || 'localhost';
+    this.url = `ws://${host}:3001`;
+  }
+
+  connect(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.ws = new WebSocket(this.url);
+
+      this.ws.onopen = () => {
+        console.log('[ws] Connected');
+        resolve();
+      };
+
+      this.ws.onclose = () => {
+        console.log('[ws] Disconnected');
+      };
+
+      this.ws.onerror = (e) => {
+        console.error('[ws] Error', e);
+        reject(e);
+      };
+
+      this.ws.onmessage = (event) => {
+        try {
+          const msg: ServerMsg = JSON.parse(event.data);
+          this.handlers.forEach((h) => h(msg));
+        } catch (e) {
+          console.error('[ws] Parse error', e);
+        }
+      };
+    });
+  }
+
+  send(msg: ClientMsg) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg));
+    }
+  }
+
+  onMessage(handler: MsgHandler) {
+    this.handlers.push(handler);
+  }
+
+  offMessage(handler: MsgHandler) {
+    this.handlers = this.handlers.filter((h) => h !== handler);
+  }
+}
+
+export const socket = new GameSocket();

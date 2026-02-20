@@ -1,0 +1,17 @@
+{
+  "name": "element-chess-td",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "npm -w packages/server run dev",
+    "dev:client": "npm -w packages/client run dev",
+    "build": "npm -w packages/shared run build && npm -w packages/server run build && npm -w packages/client run build",
+    "start": "npm -w packages/server run start",
+    "typecheck": "tsc --build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.0"
+  }
+}

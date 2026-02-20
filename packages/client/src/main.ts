@@ -1,0 +1,21 @@
+import Phaser from 'phaser';
+import { LobbyScene } from './scenes/LobbyScene';
+import { GameScene } from './scenes/GameScene';
+import { GameOverScene } from './scenes/GameOverScene';
+
+const config: Phaser.Types.Core.GameConfig = {
+  type: Phaser.AUTO,
+  parent: 'game-container',
+  width: 960,
+  height: 720,
+  backgroundColor: '#16213e',
+  scene: [LobbyScene, GameScene, GameOverScene],
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
+  pixelArt: false,
+  antialias: true,
+};
+
+new Phaser.Game(config);
