@@ -42,8 +42,13 @@ export class LobbyScene extends Phaser.Scene {
     this.codeInput = this.createInput(cx + 20, 225, 'Leave empty to create', 160);
 
     // Buttons
-    this.createButton(cx - 80, 290, 'Join / Create', () => this.joinLobby());
-    this.createButton(cx + 80, 290, 'Ready', () => this.toggleReady());
+    this.createButton(cx - 100, 290, 'Join / Create', () => this.joinLobby());
+    this.createButton(cx + 10, 290, 'Ready', () => this.toggleReady());
+    // Dev: auto join + ready in one click
+    this.createButton(cx + 120, 290, '▶ DEV', () => {
+      this.joinLobby();
+      setTimeout(() => socket.send({ type: 'READY' }), 300);
+    });
 
     // Room code display
     this.roomCodeText = this.add.text(cx, 350, '', {

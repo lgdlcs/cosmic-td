@@ -369,9 +369,16 @@ export class Game {
       .filter((p) => p.alive)
       .every((p) => this.state.mobs[p.id].length === 0);
 
-    // Check if game over (1 or 0 alive)
+    // Check if game over
     const alivePlayers = this.state.players.filter((p) => p.alive);
-    if (alivePlayers.length <= 1) {
+    if (alivePlayers.length === 0) {
+      // Everyone dead
+      clearInterval(this.tickInterval!);
+      this.endGame();
+      return;
+    }
+    if (this.state.players.length > 1 && alivePlayers.length <= 1) {
+      // Multiplayer: last one standing wins
       clearInterval(this.tickInterval!);
       this.endGame();
       return;
