@@ -81,9 +81,9 @@ class SoundFX {
 
 const sfx = new SoundFX();
 
-const CELL = 64;
-const GRID_X = 210;
-const GRID_Y = 50;
+const CELL = 32;
+const GRID_X = 224;
+const GRID_Y = 80;
 const GRID_PX = CELL * GRID_SIZE;
 
 // ── Visual effect structs ───────────────────────────────
@@ -716,7 +716,7 @@ export class GameScene extends Phaser.Scene {
         const elemColor = Phaser.Display.Color.HexStringToColor(
           ELEMENT_COLORS[def.elements[0] || 'fire']
         ).color;
-        const size = 20;
+        const size = 12;
         
         // Semi-transparent tower preview
         this.previewGfx.fillStyle(elemColor, 0.6);
@@ -771,13 +771,13 @@ export class GameScene extends Phaser.Scene {
   private drawFX() {
     this.fxGfx.clear();
 
-    // Projectiles
+    // Projectiles (scaled for 16x16 grid)
     for (const p of this.projectiles) {
       this.fxGfx.fillStyle(p.color, 0.9);
-      this.fxGfx.fillCircle(p.x, p.y, p.splash ? 5 : 3);
+      this.fxGfx.fillCircle(p.x, p.y, p.splash ? 3 : 2);
       // Trail
       this.fxGfx.fillStyle(p.color, 0.3);
-      this.fxGfx.fillCircle(p.x - (p.tx - p.x) * 0.02, p.y - (p.ty - p.y) * 0.02, 2);
+      this.fxGfx.fillCircle(p.x - (p.tx - p.x) * 0.02, p.y - (p.ty - p.y) * 0.02, 1);
     }
 
     // Death explosions
@@ -789,10 +789,10 @@ export class GameScene extends Phaser.Scene {
       this.fxGfx.fillCircle(d.x, d.y, d.radius * 0.5);
     }
 
-    // Leak flashes
+    // Leak flashes (scaled for 16x16 grid)
     for (const l of this.leakEffects) {
       this.fxGfx.fillStyle(0xff0000, l.alpha * 0.4);
-      this.fxGfx.fillCircle(l.x, l.y, 30);
+      this.fxGfx.fillCircle(l.x, l.y, 18);
     }
 
     // Shop flash effects
@@ -873,24 +873,24 @@ export class GameScene extends Phaser.Scene {
       const hpRatio = Math.max(0, mob.hp / mob.maxHp);
       const alpha = mob.visible ? 1 : 0.2;
 
-      // Size and appearance by mob type
-      let radius = 10;
+      // Size and appearance by mob type (scaled for 16x16 grid)
+      let radius = 6;
       let borderColor = 0xffffff;
       let shape: 'circle' | 'square' | 'triangle' | 'diamond' = 'circle';
 
       if (mob.defId === 'boss') {
-        radius = 18;
+        radius = 10;
         borderColor = 0xffd93d;
       } else if (mob.defId === 'tank') {
-        radius = 14;
+        radius = 8;
         borderColor = 0xff6666;
         shape = 'square';
       } else if (mob.defId === 'runner') {
-        radius = 8;
+        radius = 5;
         borderColor = 0x66ff66;
         shape = 'diamond';
       } else if (mob.defId === 'swarm') {
-        radius = 6;
+        radius = 4;
         borderColor = 0x66ccff;
         shape = 'triangle';
       }
@@ -980,7 +980,7 @@ export class GameScene extends Phaser.Scene {
         ? Phaser.Display.Color.HexStringToColor(ELEMENT_COLORS[primaryElement]).color
         : 0x666666; // Gray for base towers
 
-      const size = 20;
+      const size = 12;
 
       // Calculate actual range using tower stats
       const towerStats = getTowerStats(def, tower.appliedElements, me.totalBought);

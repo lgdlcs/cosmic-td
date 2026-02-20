@@ -2,7 +2,7 @@ import type { Element } from './types.js';
 
 // ── Game Config ─────────────────────────────────────────
 
-export const GRID_SIZE = 8;
+export const GRID_SIZE = 16;
 export const MAX_PLAYERS = 4;
 export const MIN_PLAYERS = 1; // dev/solo mode. Set to 2 for production
 export const STARTING_HP = 100;
