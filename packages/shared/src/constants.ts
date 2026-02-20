@@ -6,7 +6,7 @@ export const GRID_SIZE = 8;
 export const MAX_PLAYERS = 4;
 export const MIN_PLAYERS = 1; // dev/solo mode. Set to 2 for production
 export const STARTING_HP = 100;
-export const STARTING_GOLD = 15;
+export const STARTING_GOLD = 50; // More gold for testing
 export const STARTING_LEVEL = 1;
 export const MAX_LEVEL = 6;
 export const SHOP_SLOTS = 5;
@@ -24,7 +24,7 @@ export const FIRST_SHOP_PHASE_DURATION = 30;    // more time on round 1
 // ── Economy ─────────────────────────────────────────────
 
 export const REROLL_COST = 2;
-export const XP_COST = 4;
+export const XP_COST = 2; // Cheaper level up for testing
 export const XP_PER_PURCHASE = 4;
 export const XP_PER_ROUND = 2;
 export const BASE_INCOME = 5;
