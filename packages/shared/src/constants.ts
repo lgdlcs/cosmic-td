@@ -4,7 +4,7 @@ import type { Element, GameConfig } from './types.js';
 
 export const GRID_SIZE = 16;
 export const MAX_PLAYERS = 4;
-export const MIN_PLAYERS = 1; // dev/solo mode. Set to 2 for production
+export const MIN_PLAYERS = 1; // 1 for dev/solo, 2 for production events
 export const STARTING_HP = 100;
 export const STARTING_GOLD = 50;
 
@@ -23,8 +23,8 @@ export const TOTAL_ROUNDS = 30;
 export const TICK_RATE = 20;                    // ticks per second
 export const TICK_MS = 1000 / TICK_RATE;        // 50ms
 export const MOB_SYNC_INTERVAL = 3;             // every 3 ticks = 150ms
-export const SHOP_PHASE_DURATION = 60;          // seconds between waves
-export const FIRST_SHOP_PHASE_DURATION = 60;    // same for round 1
+export const SHOP_PHASE_DURATION = 30;          // seconds between waves
+export const FIRST_SHOP_PHASE_DURATION = 45;    // longer for round 1 (setup)
 
 // ── Economy ─────────────────────────────────────────────
 
@@ -87,12 +87,12 @@ export const PLAYER_COLOR_HEX = {
 
 // ── Mob Scaling ─────────────────────────────────────────
 
-export const MOB_BASE_HP = 60;
-export const MOB_HP_SCALE = 1.15;              // HP multiplier per round (moins agressif)
-export const MOB_COUNT_BASE = 6;
-export const MOB_COUNT_SCALE = 0.3;            // +0.3 mobs per round (floored)
+export const MOB_BASE_HP = 50;
+export const MOB_HP_SCALE = 1.10;              // HP multiplier per round (~17x over 30 rounds)
+export const MOB_COUNT_BASE = 5;
+export const MOB_COUNT_SCALE = 0.4;            // +0.4 mobs per round (floored)
 export const BOSS_ROUNDS = [5, 10, 15, 20, 25, 30];
-export const BOSS_HP_MULT = 6;
+export const BOSS_HP_MULT = 5;
 
 // ── Mob Types & Variants ────────────────────────────────
 

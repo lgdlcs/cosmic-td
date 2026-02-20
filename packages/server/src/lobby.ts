@@ -14,7 +14,7 @@ interface Room {
   config: GameConfig;
 }
 
-const rooms = new Map<string, Room>();
+export const rooms = new Map<string, Room>();
 
 function generateCode(): string {
   return nanoid(6).toUpperCase();

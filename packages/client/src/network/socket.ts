@@ -10,7 +10,12 @@ class GameSocket {
 
   constructor() {
     const host = window.location.hostname || 'localhost';
-    this.url = `ws://${host}:3001`;
+    const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    // In dev, Vite runs on 5173 but WS is on 3001
+    // In prod, both are on the same port
+    const isDev = port === '5173';
+    this.url = isDev ? `ws://${host}:3001` : `${protocol}://${host}:${port}`;
   }
 
   isConnected(): boolean {

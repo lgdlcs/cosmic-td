@@ -40,6 +40,7 @@ import {
 import { ShopManager } from './shop.js';
 import { CombatManager } from './combat.js';
 import { EconomyManager } from './economy.js';
+import { rooms } from './lobby.js';
 
 export class Game {
   state: GameState;
@@ -540,17 +541,22 @@ export class Game {
     this.state.winner = winner.id;
     this.broadcast({ type: 'GAME_OVER', winnerId: winner.id });
 
-    // Cleanup player→game mappings so they can rejoin lobby
-    this.clients.forEach((_, playerId) => {
+    // Cleanup all mappings so players can rejoin lobby
+    this.clients.forEach((client, playerId) => {
       playerToGame.delete(playerId);
     });
 
-    // Remove from active games + reset room so players can restart
     const roomCode = [...this.clients.values()][0]?.roomCode;
     if (roomCode) {
       setTimeout(() => {
         activeGames.delete(roomCode);
-        console.log(`[cleanup] Removed game ${roomCode}`);
+        // Delete the room so players create a fresh one
+        rooms.delete(roomCode);
+        // Clear roomCode on clients so they don't try to rejoin stale room
+        this.clients.forEach((client) => {
+          client.roomCode = null;
+        });
+        console.log(`[cleanup] Removed game + room ${roomCode}`);
       }, 500);
     }
   }

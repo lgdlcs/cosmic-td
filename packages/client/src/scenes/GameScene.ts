@@ -519,15 +519,7 @@ export class GameScene extends Phaser.Scene {
   // ── Network ───────────────────────────────────────────
 
   private handleMsg(msg: ServerMsg) {
-    if (msg.type === 'COMBAT_EVENTS') {
-      const m = msg as any;
-      const match = m.playerId === this.myId;
-      console.log(`[COMBAT] myId=${this.myId} msgPlayer=${m.playerId} match=${match} kills=${m.kills?.length} leaks=${m.leaks?.length}`);
-      if (m.kills?.length > 0) console.log('[COMBAT] kills:', JSON.stringify(m.kills));
-    }
-    if (msg.type === 'MOB_LEAKED') {
-      console.log('[LEAK]', msg);
-    }
+    // Debug logs removed
     switch (msg.type) {
       case 'STATE_UPDATE':
         this.gameState = msg.state;
@@ -692,9 +684,8 @@ export class GameScene extends Phaser.Scene {
         strokeThickness: 4,
       }).setOrigin(0.5).setDepth(25);
       this.damageTexts.push({ x, y, text, alpha: 1, vy, obj });
-      console.log(`[FLOAT] "${text}" at (${Math.round(x)},${Math.round(y)})`);
-    } catch (e) {
-      console.error('[FLOAT] Failed to create text:', e);
+    } catch {
+      // ignore if scene is shutting down
     }
   }
 
