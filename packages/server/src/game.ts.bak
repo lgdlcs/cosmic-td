@@ -113,7 +113,7 @@ export class Game {
         if (this.shop.buyTower(player, msg.shopIndex)) {
           this.updateSynergies(player);
           this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
-          this.broadcastStateUpdate();
+          this.broadcast({ type: 'STATE_UPDATE', state: this.state });
         }
         break;
       }
@@ -162,7 +162,7 @@ export class Game {
         }
 
         this.updateSynergies(player);
-        this.broadcastStateUpdate();
+        this.broadcast({ type: 'STATE_UPDATE', state: this.state });
         break;
       }
       case 'MOVE_TOWER': {
@@ -172,14 +172,14 @@ export class Game {
         if (isPathCell(this.map, msg.position)) return;
         if (player.towers.some((t) => t.instanceId !== msg.instanceId && t.position.row === msg.position.row && t.position.col === msg.position.col)) return;
         tower.position = msg.position;
-        this.broadcastStateUpdate();
+        this.broadcast({ type: 'STATE_UPDATE', state: this.state });
         break;
       }
       case 'SELL_TOWER': {
         if (this.state.phase !== 'shopping') return;
         if (this.shop.sellTower(player, msg.instanceId)) {
           this.updateSynergies(player);
-          this.broadcastStateUpdate();
+          this.broadcast({ type: 'STATE_UPDATE', state: this.state });
         }
         break;
       }
@@ -193,7 +193,7 @@ export class Game {
       case 'LEVEL_UP': {
         if (this.state.phase !== 'shopping') return;
         if (this.shop.levelUp(player)) {
-          this.broadcastStateUpdate();
+          this.broadcast({ type: 'STATE_UPDATE', state: this.state });
         }
         break;
       }
@@ -213,7 +213,7 @@ export class Game {
         player.gold -= hex.cost;
         target.incomingHex = { hexId: msg.hexId, fromPlayerId: playerId, toPlayerId: target.id };
         this.broadcast({ type: 'HEX_INCOMING', hex: target.incomingHex });
-        this.broadcastStateUpdate();
+        this.broadcast({ type: 'STATE_UPDATE', state: this.state });
         break;
       }
     }
@@ -272,12 +272,12 @@ export class Game {
             gold: 0, // Hide exact gold
             shop: [], // Hide shop contents
             bench: [], // Hide bench contents  
-            synergies: { fire: 0, water: 0, earth: 0, wind: 0, light: 0, dark: 0 }, // Hide exact synergies
+            synergies: {}, // Hide exact synergies
             streak: 0, // Hide streak
             xp: 0, // Hide exact XP
             xpToNext: 0,
             // Keep: hp, level, towers (count/elements only), alive status, color, name
-          } as PlayerState;
+          };
         }
       }),
     };
@@ -358,7 +358,7 @@ export class Game {
       round: this.state.round,
       timer: duration,
     });
-    this.broadcastStateUpdate();
+    this.broadcast({ type: 'STATE_UPDATE', state: this.state });
 
     // Countdown timer
     this.phaseTimer = setInterval(() => {
@@ -387,7 +387,7 @@ export class Game {
       this.state.mobs[p.id] = this.combat.spawnWave(this.state.round, p);
     });
 
-    this.broadcastStateUpdate();
+    this.broadcast({ type: 'STATE_UPDATE', state: this.state });
 
     // Start tick loop
     this.tickCount = 0;
@@ -485,7 +485,7 @@ export class Game {
       this.economy.endOfRoundIncome(p, !leaked);
     });
 
-    this.broadcastStateUpdate();
+    this.broadcast({ type: 'STATE_UPDATE', state: this.state });
     this.startNextRound();
   }
 

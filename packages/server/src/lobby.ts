@@ -105,10 +105,11 @@ export function handleMessage(client: Client, msg: ClientMsg) {
       broadcastLobby(room);
 
       // Check if all players ready and enough players
-      if (
-        room.ready.size === room.clients.length &&
-        room.clients.length >= MIN_PLAYERS
-      ) {
+      // In dev mode (MIN_PLAYERS = 1), allow solo games if the single player is ready
+      const canStart = room.ready.size === room.clients.length &&
+        (room.clients.length >= MIN_PLAYERS || (MIN_PLAYERS <= 1 && room.clients.length === 1));
+        
+      if (canStart) {
         room.started = true;
         console.log(`[game] Starting in room ${room.code} with ${room.clients.length} players`);
         createGame(room.clients, room.names);
