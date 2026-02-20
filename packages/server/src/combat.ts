@@ -173,12 +173,17 @@ export class CombatManager {
       }
 
       let speed = baseSpeed;
+      let frozen = false;
       for (const effect of mob.effects) {
         if (effect.type === 'slow') {
           speed *= (1 - effect.value);
         }
+        if (effect.type === 'freeze') {
+          frozen = true;
+        }
       }
-      speed = Math.max(speed, 0.2);
+      if (frozen) speed = 0;
+      else speed = Math.max(speed, 0.2);
 
       // Advance along path
       const nextIdx = mob.pathIndex + 1;
@@ -269,6 +274,9 @@ export class CombatManager {
       // Apply tower special effects
       this.applyTowerEffect(tower, target);
 
+      // Apply synergy special effects at 3+ of same element
+      this.applySynergyEffect(player, tower, target, remaining);
+
       // Set cooldown
       this.cooldowns.set(tower.instanceId, 1000 / def.attackSpeed);
 
@@ -309,6 +317,62 @@ export class CombatManager {
       }
     }
     return bonus;
+  }
+
+  /** Apply special synergy effects when player has 3+ towers of the same element */
+  private applySynergyEffect(player: PlayerState, tower: TowerInstance, target: MobInstance, allMobs: MobInstance[]) {
+    for (const element of tower.elements) {
+      const count = player.synergies[element] || 0;
+      if (count < 3) continue;
+
+      switch (element) {
+        case 'fire':
+          // Fire 3+: attacks cause AoE burn around target
+          for (const m of allMobs) {
+            if (m === target) continue;
+            const dx = m.x - target.x;
+            const dy = m.y - target.y;
+            if (Math.sqrt(dx * dx + dy * dy) <= 1.5) {
+              m.effects.push({ type: 'burn', remaining: 2000, value: 5 });
+            }
+          }
+          break;
+        case 'water':
+          // Water 3+: stronger slow (40% instead of 25%)
+          target.effects = target.effects.filter(e => e.type !== 'slow' || e.value < 0);
+          target.effects.push({ type: 'slow', remaining: 3000, value: 0.40 });
+          break;
+        case 'earth':
+          // Earth 3+: chance to stun (freeze) for 0.5s
+          if (Math.random() < 0.15) {
+            target.effects.push({ type: 'freeze', remaining: 500, value: 1.0 });
+          }
+          break;
+        case 'wind':
+          // Wind 3+: attacks chain to 1 nearby mob for 30% damage
+          {
+            const def = TOWER_MAP[tower.defId];
+            if (!def) break;
+            const nearby = allMobs
+              .filter(m => m !== target && Math.sqrt((m.x - target.x) ** 2 + (m.y - target.y) ** 2) <= 1.5)
+              .slice(0, 1);
+            for (const m of nearby) {
+              m.hp -= def.damage * 0.3;
+            }
+          }
+          break;
+        case 'dark':
+          // Dark 3+: stronger poison stacking
+          target.effects.push({ type: 'poison', remaining: 4000, value: 6 });
+          break;
+        case 'light':
+          // Light 3+: reveals all mobs in range and boosts all tower damage (handled via synergy bonus already)
+          for (const m of allMobs) {
+            m.visible = true;
+          }
+          break;
+      }
+    }
   }
 
   private applyTowerEffect(tower: TowerInstance, mob: MobInstance) {
