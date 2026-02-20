@@ -110,9 +110,26 @@ export const PLAYER_COLOR_HEX = {
 
 // ── Mob Scaling ─────────────────────────────────────────
 
-export const MOB_BASE_HP = 80;
-export const MOB_HP_SCALE = 1.18;              // HP multiplier per round
+export const MOB_BASE_HP = 60;
+export const MOB_HP_SCALE = 1.15;              // HP multiplier per round (moins agressif)
 export const MOB_COUNT_BASE = 6;
-export const MOB_COUNT_SCALE = 0.4;            // +0.4 mobs per round (floored)
+export const MOB_COUNT_SCALE = 0.3;            // +0.3 mobs per round (floored)
 export const BOSS_ROUNDS = [5, 10, 15, 20, 25, 30];
-export const BOSS_HP_MULT = 8;
+export const BOSS_HP_MULT = 6;
+
+// ── Mob Types & Variants ────────────────────────────────
+
+export const RUNNER_SPEED_MULT = 1.8;          // Fast, low HP
+export const RUNNER_HP_MULT = 0.6;
+export const TANK_SPEED_MULT = 0.5;            // Slow, high HP  
+export const TANK_HP_MULT = 2.2;
+export const SWARM_COUNT_MULT = 2.5;           // Many small mobs
+export const SWARM_HP_MULT = 0.4;
+
+// ── Kill Rewards by Round Tier ──────────────────────────
+
+export const KILL_REWARD_TIERS = [
+  { maxRound: 10, gold: 1 },    // Rounds 1-10: +1g per kill
+  { maxRound: 20, gold: 2 },    // Rounds 11-20: +2g per kill  
+  { maxRound: 30, gold: 3 },    // Rounds 21-30: +3g per kill
+];

@@ -290,10 +290,16 @@ export class GameScene extends Phaser.Scene {
         this.deathEffects.push({
           x: mx, y: my, radius: 8, alpha: 1, color: 0xFFD93D,
         });
-        // Gold pop text
+        // Gold pop text (dynamic reward based on round)
+        const round = this.gameState.round;
+        let goldReward = 1;
+        if (round <= 10) goldReward = 1;
+        else if (round <= 20) goldReward = 2;
+        else goldReward = 3;
+        
         this.damageTexts.push({
           x: mx, y: my - 15,
-          text: '+1g',
+          text: `+${goldReward}g`,
           alpha: 1,
           vy: -30,
         });
@@ -571,25 +577,64 @@ export class GameScene extends Phaser.Scene {
       const x = GRID_X + mob.x * CELL + CELL / 2;
       const y = GRID_Y + mob.y * CELL + CELL / 2;
       const hpRatio = Math.max(0, mob.hp / mob.maxHp);
-      const radius = mob.defId === 'boss' ? 18 : 10;
       const alpha = mob.visible ? 1 : 0.2;
 
-      // Body color: green→yellow→red
+      // Size and appearance by mob type
+      let radius = 10;
+      let borderColor = 0xffffff;
+      let shape: 'circle' | 'square' | 'triangle' | 'diamond' = 'circle';
+
+      if (mob.defId === 'boss') {
+        radius = 18;
+        borderColor = 0xffd93d;
+      } else if (mob.defId === 'tank') {
+        radius = 14;
+        borderColor = 0xff6666;
+        shape = 'square';
+      } else if (mob.defId === 'runner') {
+        radius = 8;
+        borderColor = 0x66ff66;
+        shape = 'diamond';
+      } else if (mob.defId === 'swarm') {
+        radius = 6;
+        borderColor = 0x66ccff;
+        shape = 'triangle';
+      }
+
+      // Body color: green→yellow→red based on HP
       const r = Math.floor(255 * (1 - hpRatio));
       const gr = Math.floor(200 * hpRatio + 55);
-      const color = Phaser.Display.Color.GetColor(r, gr, 50);
+      const bodyColor = Phaser.Display.Color.GetColor(r, gr, 50);
 
       // Shadow
       this.mobGfx.fillStyle(0x000000, alpha * 0.3);
       this.mobGfx.fillEllipse(x + 2, y + radius + 2, radius * 1.6, radius * 0.5);
 
-      // Body
-      this.mobGfx.fillStyle(color, alpha);
-      this.mobGfx.fillCircle(x, y, radius);
+      // Body shape
+      this.mobGfx.fillStyle(bodyColor, alpha);
+      if (shape === 'square') {
+        this.mobGfx.fillRect(x - radius * 0.7, y - radius * 0.7, radius * 1.4, radius * 1.4);
+      } else if (shape === 'triangle') {
+        this.mobGfx.fillTriangle(x, y - radius, x - radius * 0.8, y + radius * 0.6, x + radius * 0.8, y + radius * 0.6);
+      } else if (shape === 'diamond') {
+        this.mobGfx.fillTriangle(x, y - radius, x + radius, y, x, y + radius);
+        this.mobGfx.fillTriangle(x, y - radius, x - radius, y, x, y + radius);
+      } else {
+        this.mobGfx.fillCircle(x, y, radius);
+      }
 
       // Border
-      this.mobGfx.lineStyle(1.5, 0xffffff, alpha * 0.3);
-      this.mobGfx.strokeCircle(x, y, radius);
+      this.mobGfx.lineStyle(1.5, borderColor, alpha * 0.8);
+      if (shape === 'square') {
+        this.mobGfx.strokeRect(x - radius * 0.7, y - radius * 0.7, radius * 1.4, radius * 1.4);
+      } else if (shape === 'triangle') {
+        this.mobGfx.strokeTriangle(x, y - radius, x - radius * 0.8, y + radius * 0.6, x + radius * 0.8, y + radius * 0.6);
+      } else if (shape === 'diamond') {
+        this.mobGfx.strokeTriangle(x, y - radius, x + radius, y, x, y + radius);
+        this.mobGfx.strokeTriangle(x, y - radius, x - radius, y, x, y + radius);
+      } else {
+        this.mobGfx.strokeCircle(x, y, radius);
+      }
 
       // HP bar
       const barW = radius * 2.2;

@@ -17,6 +17,12 @@ import {
   STAR_DAMAGE_MULT,
   SYNERGY_THRESHOLDS,
   TOWER_MAP,
+  RUNNER_SPEED_MULT,
+  RUNNER_HP_MULT,
+  TANK_SPEED_MULT,
+  TANK_HP_MULT,
+  SWARM_COUNT_MULT,
+  SWARM_HP_MULT,
 } from '@ect/shared';
 
 export interface AttackEvent {
@@ -52,30 +58,85 @@ export class CombatManager {
   spawnWave(round: number, player: PlayerState): MobInstance[] {
     const isBoss = BOSS_ROUNDS.includes(round);
     const baseHp = Math.floor(MOB_BASE_HP * Math.pow(MOB_HP_SCALE, round - 1));
-    const count = isBoss ? 1 : Math.floor(MOB_COUNT_BASE + MOB_COUNT_SCALE * round);
+    const baseCount = Math.floor(MOB_COUNT_BASE + MOB_COUNT_SCALE * round);
 
     const mobs: MobInstance[] = [];
-    const hp = isBoss ? baseHp * BOSS_HP_MULT : baseHp;
 
     // Check for Hex modifications
     const hasHaste = player.incomingHex?.hexId === 'haste';
     const hasReinforcements = player.incomingHex?.hexId === 'reinforcements';
     const extraMobs = hasReinforcements ? 5 : 0;
 
-    for (let i = 0; i < count + extraMobs; i++) {
-      const entry = this.map.entry;
-      const staggerOffset = i * 0.6;
-      mobs.push({
-        instanceId: nanoid(8),
-        defId: isBoss ? 'boss' : 'grunt',
-        hp,
-        maxHp: hp,
-        x: entry.col,
-        y: entry.row - staggerOffset,
-        pathIndex: 0,
-        effects: hasHaste ? [{ type: 'slow', remaining: 99999, value: -0.3 }] : [],
-        visible: true,
-      });
+    if (isBoss) {
+      // Boss waves: 1-2 massive HP bosses
+      const bossHp = Math.floor(baseHp * BOSS_HP_MULT);
+      const bossCount = round >= 20 ? 2 : 1; // 2 bosses at high rounds
+      
+      for (let i = 0; i < bossCount; i++) {
+        const entry = this.map.entry;
+        const staggerOffset = i * 1.5;
+        mobs.push({
+          instanceId: nanoid(8),
+          defId: 'boss',
+          hp: bossHp,
+          maxHp: bossHp,
+          x: entry.col,
+          y: entry.row - staggerOffset,
+          pathIndex: 0,
+          effects: hasHaste ? [{ type: 'slow', remaining: 99999, value: -0.3 }] : [],
+          visible: true,
+        });
+      }
+    } else {
+      // Regular waves: determine mob type
+      const isSwarmRound = round % 3 === 0;
+      const isRunnerRound = !isSwarmRound && round % 2 === 0;
+      const isTankRound = !isSwarmRound && round % 2 === 1;
+
+      let mobType: string;
+      let count: number;
+      let hp: number;
+
+      if (isSwarmRound) {
+        // Swarm: many small mobs
+        mobType = 'swarm';
+        count = Math.floor(baseCount * SWARM_COUNT_MULT);
+        hp = Math.floor(baseHp * SWARM_HP_MULT);
+      } else if (isRunnerRound) {
+        // Runners: fast, low HP
+        mobType = 'runner';
+        count = baseCount;
+        hp = Math.floor(baseHp * RUNNER_HP_MULT);
+      } else {
+        // Tanks: slow, high HP
+        mobType = 'tank';
+        count = Math.max(2, Math.floor(baseCount * 0.6)); // Fewer tanks
+        hp = Math.floor(baseHp * TANK_HP_MULT);
+      }
+
+      count += extraMobs;
+
+      for (let i = 0; i < count; i++) {
+        const entry = this.map.entry;
+        const staggerOffset = i * (isSwarmRound ? 0.3 : 0.6);
+        
+        const effects = [];
+        if (hasHaste) {
+          effects.push({ type: 'slow' as const, remaining: 99999, value: -0.3 });
+        }
+
+        mobs.push({
+          instanceId: nanoid(8),
+          defId: mobType,
+          hp,
+          maxHp: hp,
+          x: entry.col,
+          y: entry.row - staggerOffset,
+          pathIndex: 0,
+          effects,
+          visible: true,
+        });
+      }
     }
 
     player.incomingHex = null;
@@ -97,14 +158,27 @@ export class CombatManager {
         continue;
       }
 
-      // Calculate effective speed
-      let speed = 1.5;
+      // Calculate effective speed based on mob type
+      let baseSpeed = 1.5;
+      
+      // Adjust base speed by mob type
+      if (mob.defId === 'runner') {
+        baseSpeed *= RUNNER_SPEED_MULT;
+      } else if (mob.defId === 'tank') {
+        baseSpeed *= TANK_SPEED_MULT;
+      } else if (mob.defId === 'swarm') {
+        baseSpeed *= 1.0; // Normal speed for swarm
+      } else if (mob.defId === 'boss') {
+        baseSpeed *= 0.7; // Slightly slower than normal
+      }
+
+      let speed = baseSpeed;
       for (const effect of mob.effects) {
         if (effect.type === 'slow') {
           speed *= (1 - effect.value);
         }
       }
-      speed = Math.max(speed, 0.3);
+      speed = Math.max(speed, 0.2);
 
       // Advance along path
       const nextIdx = mob.pathIndex + 1;

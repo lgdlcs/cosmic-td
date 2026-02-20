@@ -7,6 +7,7 @@ import {
   STREAK_BONUS,
   XP_PER_ROUND,
   XP_REQUIREMENTS,
+  KILL_REWARD_TIERS,
 } from '@ect/shared';
 
 export class EconomyManager {
@@ -55,6 +56,11 @@ export class EconomyManager {
 
   /** Gold reward for killing a mob */
   mobKillReward(round: number): number {
-    return 1; // 1 gold per mob kill, simple
+    for (const tier of KILL_REWARD_TIERS) {
+      if (round <= tier.maxRound) {
+        return tier.gold;
+      }
+    }
+    return 1; // fallback
   }
 }
