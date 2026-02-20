@@ -45,98 +45,90 @@
 ### Gold Sinks
 | Action | Cost |
 |---|---|
-| Buy tower | 3–5 gold (depends on tier) |
+| Buy base tower | 3–5 gold (Archer/Cannon/Mage) |
+| Buy element crystal | 4 gold |
 | Reroll shop | 2 gold |
-| Buy XP | 4 gold → 4 XP |
+| Upgrade tower (T1) | 3 gold (apply first element) |
+| Upgrade tower (T2) | 5 gold (apply second element) |
 | Cast Hex | 3–20 gold (see §8) |
 
 ### Starting Conditions
-- **Gold:** 10
+- **Gold:** 50 (increased for testing)
 - **HP:** 100
-- **Level:** 1
+- **Element Points:** 0 in all elements
 - **Shop slots:** 5
 
 ---
 
-## 4. Level & XP System
+## 4. Element Point System
 
-| Level | XP Required | Shop Odds (T1/T2/T3) |
-|---|---|---|
-| 1 | — | 100 / 0 / 0 |
-| 2 | 4 XP | 80 / 20 / 0 |
-| 3 | 8 XP | 60 / 35 / 5 |
-| 4 | 12 XP | 40 / 45 / 15 |
-| 5 | 16 XP | 25 / 40 / 35 |
-| 6 | 24 XP | 15 / 30 / 55 |
+**How to gain Element Points:**
+- **Each round (except round 1):** Choose +1 point for any element (free)
+- **Element Crystals:** Buy from shop for 4 gold (+1 point for specific element)
 
-- 2 XP granted passively per round
-- Additional XP purchasable (4 gold = 4 XP)
-- Max level: 6
+**Element Point Progression:**
+| Points | Unlock/Bonus |
+|---|---|
+| 0 | Element locked (cannot apply to towers) |
+| 1 | **Unlocked** — can apply as T1 upgrade |
+| 2 | **+15% damage** to all towers with this element + can apply as T2 upgrade |
+| 3 | **+30% damage** to all towers with this element + enhanced effects |
+
+**Element Point Cap:** 3 points maximum per element.
 
 ---
 
-## 5. Elements & Towers
+## 5. Base Towers & Element System
 
-### 6 Base Elements (T1)
+### 3 Base Tower Types (No Elements)
 
-| Element | Color | Tower Type | Attack Style |
-|---|---|---|---|
-| 🔥 Fire | Red/Orange | Flame Spitter | AoE splash damage |
-| 💧 Water | Blue | Frost Fountain | Single target + slow |
-| 🌍 Earth | Brown/Green | Stone Sentinel | High damage, slow attack |
-| 💨 Wind | Cyan/White | Gale Archer | Fast attack, long range |
-| ☀️ Light | Gold/Yellow | Radiance Beacon | Buff aura + reveal invis |
-| 🌑 Dark | Purple | Shadow Caster | DoT poison, debuff mobs |
+| Tower | Cost | Damage | Attack Speed | Range | Special |
+|---|---|---|---|---|---|
+| **Archer** | 3g | 6 | 1.5/s | 3 | Fast single-target attacks |
+| **Cannon** | 4g | 12 | 0.6/s | 2 | Slow AoE splash (radius 1) |
+| **Mage** | 5g | 8 | 1.0/s | 2.5 | Moderate damage, can apply effects |
 
-### T2 Towers — Dual Element Combinations (15 total)
+### 6 Element Effects
 
-| Combo | Name | Special |
+| Element | Effect | Description |
 |---|---|---|
-| Fire + Water | **Steam Engine** | AoE slow zone + tick damage |
-| Fire + Earth | **Magma Cannon** | Massive single-target, burning ground |
-| Fire + Wind | **Inferno Tornado** | Moving AoE, sweeps the path |
-| Fire + Light | **Solar Flare** | Burst damage, briefly blinds mobs (slow) |
-| Fire + Dark | **Hellfire Pyre** | AoE + DoT stack |
-| Water + Earth | **Mudslide Trap** | Creates slow zone on path |
-| Water + Wind | **Tsunami Wave** | Periodic knockback wave |
-| Water + Light | **Purify Spring** | Heals nearby towers + reveals |
-| Water + Dark | **Venom Tide** | Stacking poison, spreads on kill |
-| Earth + Wind | **Sandstorm Pillar** | Reduces mob accuracy (miss chance) |
-| Earth + Light | **Crystal Guardian** | Shield aura, absorbs damage for adjacent towers |
-| Earth + Dark | **Grave Monolith** | Killed mobs rise as blockers (briefly) |
-| Wind + Light | **Lightning Spire** | Chain lightning, bounces between mobs |
-| Wind + Dark | **Phantom Gust** | Chance to confuse mobs (reverse direction) |
-| Light + Dark | **Eclipse Tower** | Alternates buff/debuff phases |
+| 🔥 **Fire** | Burn DoT | 3 damage/second for 3 seconds |
+| 💧 **Water** | Slow | 25% movement speed reduction for 2 seconds |
+| 🌍 **Earth** | Power | +40% damage bonus |
+| 💨 **Wind** | Speed | +30% attack speed bonus |
+| ☀️ **Light** | Reveal | +1 range + reveals invisible mobs |
+| 🌑 **Dark** | Poison | 4 damage/second for 3 seconds (stacking) |
 
-### T3 Towers — Triple Element (20 total)
+### Tower Upgrade System
 
-Too many to detail — MVP ships with 5-6 T3 towers, expand later.
+**How it Works:**
+1. Place a **base tower** (Archer/Cannon/Mage) on the grid
+2. **Right-click** the tower to open upgrade menu (during shop phase)
+3. **Choose an element** to apply (requires 1+ points in that element)
+4. **Pay upgrade cost:** 3g for first element, 5g for second element
+5. Tower gains element's effects + damage bonus from your element points
 
-Example:
-- **Fire + Water + Wind** = **Cyclone Furnace** — massive AoE, slow + burn + fast attack
-- **Earth + Light + Dark** = **Lich King Obelisk** — summons undead blockers + buff/debuff aura
+**Examples:**
+- **Archer** + 🔥Fire (1 point) = **Fire Archer** (6 damage → 6 damage + burn effect)
+- **Archer** + 🔥Fire (2 points) = **Fire Archer** (6 damage → 6.9 damage + burn effect)
+- **Fire Archer** + 💧Water = **Steam Archer** (damage + burn + slow effects)
 
-### Fusion System (3-star)
+### Element Point Damage Scaling
 
-- 3 copies of the **same tower** → fused into **★ version**
-- ★ = +50% stats, enhanced ability
-- 3x ★ = ★★ (unlikely but devastating)
+Your element points provide **global bonuses** to all towers with those elements:
 
-### Elemental Synergies (board-wide)
+- **1 point:** Base element unlocked
+- **2 points:** +15% damage to all towers with this element  
+- **3 points:** +30% damage to all towers with this element
 
-| Count | Bonus |
-|---|---|
-| 2 same element | +10% attack speed for that element |
-| 3 same element | +20% damage for that element |
-| 4 same element | +30% damage + special proc (element-specific) |
+**Example:** If you have 3 Fire points, ALL your Fire towers get +30% damage.
 
-Element-specific 4-piece procs:
-- 🔥 Fire 4: Attacks have 20% chance to explode (double AoE)
-- 💧 Water 4: Slow becomes freeze (1s stun) on proc
-- 🌍 Earth 4: Towers gain +50% HP (can tank Siege Golems)
-- 💨 Wind 4: Attacks have 15% chance for double strike
-- ☀️ Light 4: All towers gain +1 range
-- 🌑 Dark 4: Mobs take 3% max HP/s as shadow damage
+### Dynamic Tower Names
+
+Tower names change based on applied elements:
+- **Base:** "Archer", "Cannon", "Mage"
+- **Single Element:** "Fire Archer", "Water Cannon", "Earth Mage"
+- **Dual Element:** "Fire-Water Archer", "Earth-Wind Cannon", etc.
 
 ---
 
@@ -238,13 +230,20 @@ Haste, Reinforcements, Siege Golem — the rest are stretch goals.
 
 ---
 
-## 9. Shared Pool
+## 9. Shop System
 
-- All players draw from the **same tower pool**
-- If Player 1 buys a Fire T1, there's one less in the pool
-- Pool size per tower: T1 = 30 copies, T2 = 15 copies, T3 = 8 copies
-- Selling a tower returns it to the pool
-- Creates metagame: scout opponents, pivot elements if contested
+**Shop Contents (5 slots):**
+- **Base Towers:** Archer (3g), Cannon (4g), Mage (5g)
+- **Element Crystals:** 4g each, +1 point for specific element (20% chance per slot)
+
+**No Shared Pool:** Base towers are unlimited — no competition for tower types.
+
+**Competition is for Elements:** Players compete for element point accumulation and upgrade timing.
+
+**Shop Strategy:**
+- Early game: Buy base towers, get map presence
+- Mid game: Buy crystals to boost key elements, upgrade existing towers  
+- Late game: Focus on T2 upgrades (dual-element towers) for maximum power
 
 ---
 
