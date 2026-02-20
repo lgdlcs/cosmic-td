@@ -132,8 +132,9 @@ export class GameScene extends Phaser.Scene {
   // Tower flash (instanceId → remaining ms)
   private towerFlash: Map<string, number> = new Map();
 
-  // Shop/Bench interaction state
-  private selectedBenchIndex: number = -1; // -1 = none selected, 0+ = bench index
+  // Shop interaction state (no more bench)
+  private selectedShopIndex: number = -1; // -1 = none selected, 0+ = shop index
+  private selectedTowerDefId: string | null = null; // defId of selected tower for preview
   private gridHover: GridHover | null = null;
   private hoveredTower: string | null = null; // instanceId of hovered tower
 
@@ -145,8 +146,6 @@ export class GameScene extends Phaser.Scene {
   private uiTopRight!: Phaser.GameObjects.Text;
   private uiShopSlots: Phaser.GameObjects.Text[] = [];
   private uiSynergy!: Phaser.GameObjects.Text;
-  private uiBenchSlots: Phaser.GameObjects.Text[] = [];
-  private uiBenchLabel!: Phaser.GameObjects.Text;
   private uiOpponents: Phaser.GameObjects.Text[] = [];
   private uiHex!: Phaser.GameObjects.Text;
   private uiMobCount!: Phaser.GameObjects.Text;
@@ -182,7 +181,8 @@ export class GameScene extends Phaser.Scene {
     this.leakEffects = [];
     this.shopFlashEffects = [];
     this.towerFlash.clear();
-    this.selectedBenchIndex = -1;
+    this.selectedShopIndex = -1;
+    this.selectedTowerDefId = null;
     this.gridHover = null;
     this.hoveredTower = null;
 
@@ -201,6 +201,22 @@ export class GameScene extends Phaser.Scene {
     this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => {
       this.updateGridHover(ptr);
       this.updateTowerHover(ptr);
+    });
+
+    // Right click to deselect
+    this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
+      if (ptr.rightButtonDown()) {
+        this.selectedShopIndex = -1;
+        this.selectedTowerDefId = null;
+        this.updateUI();
+      }
+    });
+
+    // ESC to deselect
+    this.input.keyboard?.on('keydown-ESC', () => {
+      this.selectedShopIndex = -1;
+      this.selectedTowerDefId = null;
+      this.updateUI();
     });
 
     this.msgHandler = (msg) => this.handleMsg(msg);
@@ -455,7 +471,7 @@ export class GameScene extends Phaser.Scene {
     const col = Math.floor((ptr.x - GRID_X) / CELL);
     const row = Math.floor((ptr.y - GRID_Y) / CELL);
     
-    if (col >= 0 && col < GRID_SIZE && row >= 0 && row < GRID_SIZE && this.selectedBenchIndex >= 0) {
+    if (col >= 0 && col < GRID_SIZE && row >= 0 && row < GRID_SIZE && this.selectedShopIndex >= 0) {
       const position = { row, col };
       const me = this.me();
       const isPath = isPathCell(this.mapDef, position);
@@ -501,10 +517,13 @@ export class GameScene extends Phaser.Scene {
     // Clear previous preview
     this.gridGfx.lineStyle(0, 0);
     
-    if (this.gridHover && this.selectedBenchIndex >= 0) {
+    if (this.gridHover && this.selectedShopIndex >= 0 && this.selectedTowerDefId) {
       const x = GRID_X + this.gridHover.position.col * CELL;
       const y = GRID_Y + this.gridHover.position.row * CELL;
+      const cx = x + CELL / 2;
+      const cy = y + CELL / 2;
       
+      // Draw preview cell background
       if (this.gridHover.valid) {
         this.gridGfx.fillStyle(0x44ff44, 0.3);
         this.gridGfx.lineStyle(2, 0x44ff44, 0.8);
@@ -515,6 +534,48 @@ export class GameScene extends Phaser.Scene {
       
       this.gridGfx.fillRect(x, y, CELL, CELL);
       this.gridGfx.strokeRect(x, y, CELL, CELL);
+      
+      // Draw tower preview
+      const def = TOWER_MAP[this.selectedTowerDefId];
+      if (def && this.gridHover.valid) {
+        const elemColor = Phaser.Display.Color.HexStringToColor(
+          ELEMENT_COLORS[def.elements[0] || 'fire']
+        ).color;
+        const size = 20;
+        
+        // Semi-transparent tower preview
+        this.gridGfx.fillStyle(elemColor, 0.6);
+        const elem = def.elements[0];
+        
+        // Draw tower shape based on element
+        switch (elem) {
+          case 'fire':
+            this.gridGfx.fillTriangle(cx, cy - size, cx - size * 0.8, cy + size * 0.6, cx + size * 0.8, cy + size * 0.6);
+            break;
+          case 'water':
+            this.gridGfx.fillTriangle(cx, cy + size, cx - size * 0.8, cy - size * 0.6, cx + size * 0.8, cy - size * 0.6);
+            break;
+          case 'earth':
+            this.gridGfx.fillRect(cx - size * 0.7, cy - size * 0.7, size * 1.4, size * 1.4);
+            break;
+          case 'wind':
+            this.gridGfx.fillTriangle(cx, cy - size, cx + size, cy, cx, cy + size);
+            this.gridGfx.fillTriangle(cx, cy - size, cx - size, cy, cx, cy + size);
+            break;
+          case 'light':
+            this.gridGfx.fillCircle(cx, cy, size * 0.8);
+            break;
+          case 'dark':
+            this.gridGfx.fillCircle(cx, cy, size);
+            break;
+          default:
+            this.gridGfx.fillCircle(cx, cy, size);
+        }
+        
+        // Show range preview
+        this.gridGfx.lineStyle(1, elemColor, 0.2);
+        this.gridGfx.strokeCircle(cx, cy, def.range * CELL);
+      }
     }
 
     // Highlight hovered tower for selling
@@ -910,7 +971,7 @@ export class GameScene extends Phaser.Scene {
       })
         .setDepth(5)
         .setInteractive({ useHandCursor: true })
-        .on('pointerdown', () => this.buyTower(i));
+        .on('pointerdown', () => this.selectShopSlot(i));
       this.uiShopSlots.push(txt);
     }
 
@@ -940,27 +1001,10 @@ export class GameScene extends Phaser.Scene {
       fontSize: '12px', color: '#aaa',
     }).setDepth(5);
 
-    // Bench label and slots
-    this.uiBenchLabel = this.add.text(GRID_X, shopY + 80, 'BENCH (click to select)', {
+    // Shop instruction text (no more bench)
+    this.add.text(GRID_X, shopY + 80, 'Click shop slot to select → Click grid to place', {
       fontSize: '11px', color: '#666', fontStyle: 'bold',
     }).setDepth(5);
-
-    // Create 8 bench slots
-    for (let i = 0; i < 8; i++) {
-      const x = GRID_X + (i % 4) * 130;
-      const y = shopY + 96 + Math.floor(i / 4) * 28;
-      const txt = this.add.text(x, y, '', {
-        fontSize: '11px', color: '#ccc',
-        backgroundColor: '#2a2a4a',
-        padding: { x: 4, y: 3 },
-        fixedWidth: 125,
-        wordWrap: { width: 115 },
-      })
-        .setDepth(5)
-        .setInteractive({ useHandCursor: true })
-        .on('pointerdown', () => this.selectBenchSlot(i));
-      this.uiBenchSlots.push(txt);
-    }
 
     // Tower hover info
     this.uiTowerHoverInfo = this.add.text(GRID_X + GRID_PX, GRID_Y + GRID_PX - 20, '', {
@@ -978,16 +1022,22 @@ export class GameScene extends Phaser.Scene {
     // Shop
     for (let i = 0; i < 5; i++) {
       const defId = me.shop[i];
+      const isSelected = this.selectedShopIndex === i;
+      
       if (defId) {
         const def = TOWER_MAP[defId];
         if (def) {
           const elems = def.elements.map((e) => ELEMENT_SYMBOLS[e]).join('');
           this.uiShopSlots[i]
             .setText(`${elems} ${def.name}\n${def.cost}g T${def.tier}`)
-            .setColor(ELEMENT_COLORS[def.elements[0]] || '#eee');
+            .setColor(isSelected ? '#ffd93d' : (ELEMENT_COLORS[def.elements[0]] || '#eee'))
+            .setBackgroundColor(isSelected ? '#4a4a0a' : '#0f3460');
         }
       } else {
-        this.uiShopSlots[i].setText('  — empty —').setColor('#444');
+        this.uiShopSlots[i]
+          .setText('  — empty —')
+          .setColor('#444')
+          .setBackgroundColor('#0f3460');
       }
     }
 
@@ -999,32 +1049,8 @@ export class GameScene extends Phaser.Scene {
         parts.push(`${sym}×${count}`);
       }
     }
-    this.uiSynergy.setText(`Synergies: ${parts.join('  ') || 'none yet'}`);
-
-    // Bench slots
-    for (let i = 0; i < 8; i++) {
-      const defId = me.bench[i];
-      const isSelected = this.selectedBenchIndex === i;
-      
-      if (defId) {
-        const def = TOWER_MAP[defId];
-        if (def) {
-          const elems = def.elements.map(e => ELEMENT_SYMBOLS[e]).join('');
-          this.uiBenchSlots[i]
-            .setText(`${elems} ${def.name}`)
-            .setColor(isSelected ? '#ffd93d' : (ELEMENT_COLORS[def.elements[0]] || '#ccc'))
-            .setBackgroundColor(isSelected ? '#4a4a0a' : '#2a2a4a');
-        }
-      } else {
-        this.uiBenchSlots[i]
-          .setText('—')
-          .setColor('#666')
-          .setBackgroundColor('#2a2a4a');
-      }
-    }
-
-    // Update bench label
-    this.uiBenchLabel.setText(`BENCH (${me.bench.length}/8) ${this.selectedBenchIndex >= 0 ? '— Click grid to place' : '— Click slot to select'}`);
+    const selectionStatus = this.selectedShopIndex >= 0 ? '— Click grid to place tower' : '';
+    this.uiSynergy.setText(`Synergies: ${parts.join('  ') || 'none yet'}  ${selectionStatus}`);
 
     // Opponents
     const opponents = this.gameState.players.filter((p) => p.id !== this.myId);
@@ -1059,9 +1085,21 @@ export class GameScene extends Phaser.Scene {
 
   // ── Actions ───────────────────────────────────────────
 
-  private buyTower(shopIndex: number) {
+  private selectShopSlot(shopIndex: number) {
     if (this.gameState.phase !== 'shopping') return;
-    socket.send({ type: 'BUY_TOWER', shopIndex });
+    const me = this.me();
+    if (!me || !me.shop[shopIndex]) return;
+    
+    // Toggle selection
+    if (this.selectedShopIndex === shopIndex) {
+      this.selectedShopIndex = -1;
+      this.selectedTowerDefId = null;
+    } else {
+      this.selectedShopIndex = shopIndex;
+      this.selectedTowerDefId = me.shop[shopIndex];
+    }
+    
+    this.updateUI();
   }
 
   private onGridClick(pos: GridPos) {
@@ -1076,28 +1114,20 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Check if trying to place a tower
-    if (this.selectedBenchIndex < 0 || !me.bench[this.selectedBenchIndex]) return;
+    // Check if trying to place a tower from shop
+    if (this.selectedShopIndex < 0 || !this.selectedTowerDefId) return;
     if (isPathCell(this.mapDef, pos)) return;
     
     socket.send({ 
-      type: 'PLACE_TOWER', 
-      benchIndex: this.selectedBenchIndex, 
+      type: 'BUY_AND_PLACE', 
+      shopIndex: this.selectedShopIndex, 
       position: pos 
     });
     sfx.towerPlace();
     
-    // Deselect after placement
-    this.selectedBenchIndex = -1;
-    this.updateUI();
-  }
-
-  private selectBenchSlot(index: number) {
-    if (this.gameState.phase !== 'shopping') return;
-    const me = this.me();
-    if (!me || !me.bench[index]) return;
-    
-    this.selectedBenchIndex = this.selectedBenchIndex === index ? -1 : index;
+    // Deselect after placement attempt
+    this.selectedShopIndex = -1;
+    this.selectedTowerDefId = null;
     this.updateUI();
   }
 

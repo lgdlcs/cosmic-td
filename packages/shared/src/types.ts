@@ -147,6 +147,7 @@ export type ClientMsg =
   | { type: 'JOIN_LOBBY'; name: string; roomCode?: string }
   | { type: 'READY' }
   | { type: 'BUY_TOWER'; shopIndex: number }
+  | { type: 'BUY_AND_PLACE'; shopIndex: number; position: GridPos }
   | { type: 'SELL_TOWER'; instanceId: string }
   | { type: 'PLACE_TOWER'; benchIndex: number; position: GridPos }
   | { type: 'MOVE_TOWER'; instanceId: string; position: GridPos }

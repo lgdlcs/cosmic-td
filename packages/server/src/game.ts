@@ -28,6 +28,7 @@ import {
   TICK_MS,
   MOB_SYNC_INTERVAL,
   TOWER_MAP,
+  TOWER_COST,
   isPathCell,
   HEX_MAP,
   getComboTower,
@@ -112,6 +113,63 @@ export class Game {
     if (!player || !player.alive) return;
 
     switch (msg.type) {
+      case 'BUY_AND_PLACE': {
+        if (this.state.phase !== 'shopping') return;
+        if (msg.shopIndex < 0 || msg.shopIndex >= SHOP_SLOTS) return;
+        const defId = player.shop[msg.shopIndex];
+        if (!defId) return;
+        
+        const def = TOWER_MAP[defId];
+        if (!def) return;
+        
+        const cost = TOWER_COST[def.tier as keyof typeof TOWER_COST] || 3;
+        if (player.gold < cost) return;
+        
+        // Validate position
+        if (isPathCell(this.map, msg.position)) return;
+        if (msg.position.row < 0 || msg.position.row >= 8 || msg.position.col < 0 || msg.position.col >= 8) return;
+        if (player.towers.some((t) => t.position.row === msg.position.row && t.position.col === msg.position.col)) return;
+
+        // Check for fusion (if player already has 2+ copies of same tower placed)
+        const sameTowers = player.towers.filter((t) => t.defId === defId && t.starLevel === 0);
+        
+        if (sameTowers.length >= 2) {
+          // Fusion! Remove 2 existing towers, create ★ version at new position
+          const toRemove = sameTowers.slice(0, 2);
+          player.towers = player.towers.filter((t) => !toRemove.includes(t));
+          
+          const fused: TowerInstance = {
+            instanceId: nanoid(8),
+            defId,
+            position: msg.position,
+            starLevel: 1,
+            elements: [...def.elements],
+          };
+          player.towers.push(fused);
+        } else {
+          // Normal placement
+          const tower: TowerInstance = {
+            instanceId: nanoid(8),
+            defId,
+            position: msg.position,
+            starLevel: 0,
+            elements: [...def.elements],
+          };
+          player.towers.push(tower);
+        }
+
+        // Deduct cost and clear shop slot
+        player.gold -= cost;
+        player.shop[msg.shopIndex] = null;
+
+        // Check for T2 fusion (two different T1 elements → T2 combo)
+        this.checkT2Fusion(player);
+
+        this.updateSynergies(player);
+        this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
+        this.broadcastStateUpdate();
+        break;
+      }
       case 'BUY_TOWER': {
         if (this.state.phase !== 'shopping') return;
         if (this.shop.buyTower(player, msg.shopIndex)) {
