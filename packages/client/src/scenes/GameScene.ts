@@ -496,12 +496,39 @@ export class GameScene extends Phaser.Scene {
         this.hoveredTower = tower.instanceId;
         const def = TOWER_MAP[tower.defId];
         if (def) {
-          const elems = def.elements.map(e => ELEMENT_SYMBOLS[e]).join('');
-          const starLabel = tower.starLevel > 0 ? ` ★${tower.starLevel}` : '';
+          const elems = def.elements.map(e => `${ELEMENT_SYMBOLS[e]}${e}`).join(', ');
+          const starLabel = tower.starLevel > 0 ? ` ${'★'.repeat(tower.starLevel)}` : '';
+          const tierLabel = `T${def.tier}`;
+          
+          // Calculate actual damage with star multiplier
+          const baseDamage = def.damage;
+          const starMult = tower.starLevel === 0 ? 1.0 : tower.starLevel === 1 ? 1.5 : 2.0;
+          const actualDamage = Math.floor(baseDamage * starMult);
+          
           const sellPrice = Math.floor(def.cost * 0.7);
-          const info = `${elems} ${def.name}${starLabel}  |  DMG: ${def.damage}  SPD: ${def.attackSpeed}  RNG: ${def.range}`;
-          const sellInfo = this.gameState.phase === 'shopping' ? `  |  💰 Sell ${sellPrice}g` : '';
-          this.uiTowerHoverInfo.setText(info + sellInfo);
+          
+          let info = `${def.name}${starLabel} (${tierLabel})\n`;
+          info += `${elems}\n`;
+          info += `DMG: ${actualDamage}  ATK SPD: ${def.attackSpeed}/s  RANGE: ${def.range}`;
+          
+          if (def.special) {
+            info += `\nSpecial: ${def.special}`;
+          }
+          
+          if (def.splashRadius) {
+            info += `\nSplash radius: ${def.splashRadius}`;
+          }
+          
+          if (this.gameState.phase === 'shopping') {
+            info += `\n💰 Click to sell for ${sellPrice}g`;
+          }
+          
+          this.uiTowerHoverInfo.setText(info);
+          
+          // Position tooltip near mouse cursor but keep it on screen
+          const tooltipX = Math.min(ptr.x + 15, this.scale.width - 250);
+          const tooltipY = Math.max(ptr.y - 60, 10);
+          this.uiTowerHoverInfo.setPosition(tooltipX, tooltipY);
         }
       } else {
         this.hoveredTower = null;
@@ -1028,10 +1055,18 @@ export class GameScene extends Phaser.Scene {
       fontSize: '11px', color: '#666', fontStyle: 'bold',
     }).setDepth(5);
 
-    // Tower hover info
-    this.uiTowerHoverInfo = this.add.text(GRID_X + GRID_PX, GRID_Y + GRID_PX - 20, '', {
-      fontSize: '12px', color: '#ffd93d',
-    }).setOrigin(1, 0).setDepth(5);
+    // Tower hover tooltip
+    this.uiTowerHoverInfo = this.add.text(0, 0, '', {
+      fontSize: '12px', 
+      color: '#ffffff',
+      backgroundColor: '#1a1a2e',
+      padding: { x: 8, y: 6 },
+      stroke: '#ffd93d',
+      strokeThickness: 1,
+      fixedWidth: 240,
+      wordWrap: { width: 220 },
+      align: 'left'
+    }).setOrigin(0, 0).setDepth(10);
   }
 
   private updateUI() {
