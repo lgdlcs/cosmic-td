@@ -152,7 +152,8 @@ export type ClientMsg =
   | { type: 'MOVE_TOWER'; instanceId: string; position: GridPos }
   | { type: 'REROLL' }
   | { type: 'LEVEL_UP' }
-  | { type: 'CAST_HEX'; hexId: HexId; targetPlayerId: string };
+  | { type: 'CAST_HEX'; hexId: HexId; targetPlayerId: string }
+  | { type: 'DEV_START_COMBAT' };
 
 // Server → Client
 export type ServerMsg =

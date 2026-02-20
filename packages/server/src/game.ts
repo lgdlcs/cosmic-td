@@ -197,6 +197,12 @@ export class Game {
         }
         break;
       }
+      case 'DEV_START_COMBAT': {
+        if (this.state.phase !== 'shopping') return;
+        if (this.phaseTimer) clearInterval(this.phaseTimer);
+        this.startCombat();
+        break;
+      }
       case 'CAST_HEX': {
         if (this.state.phase !== 'shopping') return;
         const hex = HEX_MAP[msg.hexId];

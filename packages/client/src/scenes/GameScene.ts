@@ -668,6 +668,13 @@ export class GameScene extends Phaser.Scene {
     }).setDepth(5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => socket.send({ type: 'LEVEL_UP' }));
 
+    // DEV: skip shop timer
+    this.add.text(btnX, shopY + 86, '▶ SEND WAVE', {
+      fontSize: '13px', color: '#1a1a2e', backgroundColor: '#D94A4A',
+      padding: { x: 8, y: 8 },
+    }).setDepth(5).setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => socket.send({ type: 'DEV_START_COMBAT' }));
+
     // Synergy
     this.uiSynergy = this.add.text(GRID_X, shopY + 62, '', {
       fontSize: '12px', color: '#aaa',
