@@ -595,6 +595,28 @@ export class GameScene extends Phaser.Scene {
 
   private drawFX() {
     this.fxGfx.clear();
+    
+    // Fusion indicator glow for shop slots
+    const me = this.me();
+    if (me && this.gameState.phase === 'shopping') {
+      for (let i = 0; i < 5; i++) {
+        const defId = me.shop[i];
+        if (defId) {
+          const sameTowersPlaced = me.towers.filter(t => t.defId === defId && t.starLevel === 0);
+          if (sameTowersPlaced.length >= 2) {
+            const slot = this.uiShopSlots[i];
+            if (slot) {
+              const bounds = slot.getBounds();
+              const glowAlpha = (Math.sin(Date.now() * 0.008) + 1) * 0.3 + 0.2; // Pulsing glow
+              this.fxGfx.lineStyle(3, 0xffd93d, glowAlpha);
+              this.fxGfx.strokeRect(bounds.x - 6, bounds.y - 6, bounds.width + 12, bounds.height + 12);
+              this.fxGfx.fillStyle(0xffd93d, glowAlpha * 0.1);
+              this.fxGfx.fillRect(bounds.x - 6, bounds.y - 6, bounds.width + 12, bounds.height + 12);
+            }
+          }
+        }
+      }
+    }
 
     // Projectiles
     for (const p of this.projectiles) {
@@ -1028,10 +1050,25 @@ export class GameScene extends Phaser.Scene {
         const def = TOWER_MAP[defId];
         if (def) {
           const elems = def.elements.map((e) => ELEMENT_SYMBOLS[e]).join('');
+          
+          // Check if this would trigger fusion (player has 2+ copies of same tower placed)
+          const sameTowersPlaced = me.towers.filter(t => t.defId === defId && t.starLevel === 0);
+          const willFuse = sameTowersPlaced.length >= 2;
+          
+          let displayText = `${elems} ${def.name}\n${def.cost}g T${def.tier}`;
+          let textColor = isSelected ? '#ffd93d' : (ELEMENT_COLORS[def.elements[0]] || '#eee');
+          let bgColor = isSelected ? '#4a4a0a' : '#0f3460';
+          
+          if (willFuse) {
+            displayText += '\n⭐ FUSE!';
+            bgColor = isSelected ? '#6a4a0a' : '#4a3010'; // Golden background
+            if (!isSelected) textColor = '#ffd93d'; // Golden text
+          }
+          
           this.uiShopSlots[i]
-            .setText(`${elems} ${def.name}\n${def.cost}g T${def.tier}`)
-            .setColor(isSelected ? '#ffd93d' : (ELEMENT_COLORS[def.elements[0]] || '#eee'))
-            .setBackgroundColor(isSelected ? '#4a4a0a' : '#0f3460');
+            .setText(displayText)
+            .setColor(textColor)
+            .setBackgroundColor(bgColor);
         }
       } else {
         this.uiShopSlots[i]
