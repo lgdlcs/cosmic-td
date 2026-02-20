@@ -218,27 +218,11 @@ export class GameScene extends Phaser.Scene {
     // Right click to deselect or show upgrade menu
     this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
       if (ptr.rightButtonDown()) {
-        const col = Math.floor((ptr.x - GRID_X) / CELL);
-        const row = Math.floor((ptr.y - GRID_Y) / CELL);
-        
-        if (col >= 0 && col < GRID_SIZE && row >= 0 && row < GRID_SIZE && this.gameState.phase === 'shopping') {
-          const me = this.me();
-          const tower = me?.towers.find(t => t.position.row === row && t.position.col === col);
-          
-          if (tower && tower.appliedElements.length < 2) {
-            this.showUpgradeMenu(tower, ptr.x, ptr.y);
-          } else {
-            this.hideUpgradeMenu();
-            this.selectedShopIndex = -1;
-            this.selectedTowerDefId = null;
-            this.updateUI();
-          }
-        } else {
-          this.hideUpgradeMenu();
-          this.selectedShopIndex = -1;
-          this.selectedTowerDefId = null;
-          this.updateUI();
-        }
+        // Right click = close menus / deselect
+        this.hideUpgradeMenu();
+        this.selectedShopIndex = -1;
+        this.selectedTowerDefId = null;
+        this.updateUI();
       }
     });
 
@@ -416,6 +400,21 @@ export class GameScene extends Phaser.Scene {
       }
     });
     
+    // Sell button at the bottom
+    const sellRefund = Math.floor((tower.appliedElements.length === 0 ? 3 : tower.appliedElements.length === 1 ? 6 : 11) * 0.7);
+    const sellBtn = this.add.text(0, 45, `🗑 Sell (${sellRefund}g)`, {
+      fontSize: '11px',
+      color: '#ff6b6b',
+      backgroundColor: '#2a1a1a',
+      padding: { x: 6, y: 3 },
+      align: 'center',
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    sellBtn.on('pointerdown', () => {
+      socket.send({ type: 'SELL_TOWER', instanceId: tower.instanceId });
+      this.hideUpgradeMenu();
+    });
+    this.upgradeMenu.add(sellBtn);
+
     this.upgradeMenu.setDepth(15);
   }
 
@@ -1366,10 +1365,12 @@ export class GameScene extends Phaser.Scene {
     const me = this.me();
     if (!me) return;
 
-    // Check if clicking on a tower to sell it
+    // Check if clicking on a tower → open upgrade menu (not sell!)
     const existingTower = me.towers.find(t => t.position.row === pos.row && t.position.col === pos.col);
     if (existingTower) {
-      socket.send({ type: 'SELL_TOWER', instanceId: existingTower.instanceId });
+      const x = GRID_X + pos.col * CELL + CELL / 2;
+      const y = GRID_Y + pos.row * CELL + CELL / 2;
+      this.showUpgradeMenu(existingTower, x, y);
       return;
     }
 

@@ -18,4 +18,7 @@ const config: Phaser.Types.Core.GameConfig = {
   antialias: true,
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+
+// Disable browser context menu on the game canvas
+document.getElementById('game-container')?.addEventListener('contextmenu', (e) => e.preventDefault());
