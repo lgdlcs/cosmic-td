@@ -237,7 +237,7 @@ export class CombatManager {
       }
 
       // Calculate tower stats using new system
-      const towerStats = getTowerStats(def, tower.appliedElements, player.elementPoints);
+      const towerStats = getTowerStats(def, tower.appliedElements, player.totalBought);
       
       // Find target (closest to exit) using new tower stats
       const inRange = remaining.filter((m) => {

@@ -4,31 +4,48 @@ import {
   REROLL_COST,
   SELL_REFUND_RATIO,
   BASE_TOWER_COSTS,
-  CRYSTAL_SHOP_CHANCE,
-  CRYSTAL_COST,
+  SHOP_FRAGMENT_CHANCE,
+  SHOP_TOWER_CHANCE,
+  FRAGMENT_POOL_SIZE,
   ELEMENTS,
   BASE_TOWERS,
-  ELEMENT_CRYSTALS,
+  getFragmentCost,
   TOWER_MAP,
 } from '@ect/shared';
 
 export class ShopManager {
   state: GameState;
+  fragmentPool: Map<Element, number>; // shared pool of fragments
 
   constructor(state: GameState) {
     this.state = state;
+    // Initialize fragment pool: 12 fragments per element
+    this.fragmentPool = new Map();
+    for (const element of ELEMENTS) {
+      this.fragmentPool.set(element, FRAGMENT_POOL_SIZE);
+    }
   }
 
-  /** Generate 5 shop slots for a player - base towers + crystals */
+  /** Generate 5 shop slots for a player - base towers + fragments */
   generateShop(player: PlayerState): (string | null)[] {
     const shop: (string | null)[] = [];
 
     for (let i = 0; i < SHOP_SLOTS; i++) {
-      if (Math.random() < CRYSTAL_SHOP_CHANCE) {
-        // Generate element crystal
-        const randomElement = ELEMENTS[Math.floor(Math.random() * ELEMENTS.length)];
-        const crystal = ELEMENT_CRYSTALS.find(c => c.element === randomElement);
-        shop.push(crystal ? crystal.id : null);
+      if (Math.random() < SHOP_FRAGMENT_CHANCE) {
+        // Try to generate a fragment
+        // Get elements that are still available in pool
+        const availableElements = ELEMENTS.filter(e => (this.fragmentPool.get(e) || 0) > 0);
+        
+        if (availableElements.length > 0) {
+          // Pick random available element
+          const randomElement = availableElements[Math.floor(Math.random() * availableElements.length)];
+          // Store fragment as: "fragment:<element>"
+          shop.push(`fragment:${randomElement}`);
+        } else {
+          // No fragments available, fall back to base tower
+          const randomTower = BASE_TOWERS[Math.floor(Math.random() * BASE_TOWERS.length)];
+          shop.push(randomTower.id);
+        }
       } else {
         // Generate base tower
         const randomTower = BASE_TOWERS[Math.floor(Math.random() * BASE_TOWERS.length)];
@@ -76,33 +93,48 @@ export class ShopManager {
     return true;
   }
 
-  /** Buy element crystal and add point to that element */
-  buyCrystal(player: PlayerState, shopIndex: number): boolean {
+  /** Buy fragment from shop */
+  buyFragment(player: PlayerState, shopIndex: number): boolean {
     if (shopIndex < 0 || shopIndex >= SHOP_SLOTS) return false;
-    const crystalId = player.shop[shopIndex];
-    if (!crystalId) return false;
+    const itemId = player.shop[shopIndex];
+    if (!itemId || !this.isFragment(itemId)) return false;
 
-    const crystal = ELEMENT_CRYSTALS.find(c => c.id === crystalId);
-    if (!crystal) return false;
+    const element = this.getFragmentElement(itemId);
+    if (!element) return false;
 
-    if (player.gold < crystal.cost) return false;
-    if (player.elementPoints[crystal.element] >= 3) return false; // Max 3 points per element
+    // Check if fragment is still available in pool
+    const available = this.fragmentPool.get(element) || 0;
+    if (available <= 0) return false;
 
-    player.gold -= crystal.cost;
-    player.elementPoints[crystal.element]++;
+    // Calculate cost based on player's totalBought
+    const cost = getFragmentCost(element, player.totalBought[element]);
+    if (player.gold < cost) return false;
+
+    // Execute purchase
+    player.gold -= cost;
+    player.fragments[element]++;
+    player.totalBought[element]++;
+    this.fragmentPool.set(element, available - 1);
     player.shop[shopIndex] = null;
 
     return true;
   }
 
-  /** Check if a shop item is a crystal */
-  isCrystal(itemId: string | null): boolean {
+  /** Check if a shop item is a fragment */
+  isFragment(itemId: string | null): boolean {
     if (!itemId) return false;
-    return ELEMENT_CRYSTALS.some(c => c.id === itemId);
+    return itemId.startsWith('fragment:');
   }
 
-  /** Get crystal info for a shop item */
-  getCrystal(itemId: string) {
-    return ELEMENT_CRYSTALS.find(c => c.id === itemId);
+  /** Get element from fragment ID */
+  getFragmentElement(itemId: string): Element | null {
+    if (!this.isFragment(itemId)) return null;
+    const element = itemId.replace('fragment:', '') as Element;
+    return ELEMENTS.includes(element) ? element : null;
+  }
+
+  /** Get fragment cost for display in shop */
+  getFragmentCost(element: Element, player: PlayerState): number {
+    return getFragmentCost(element, player.totalBought[element]);
   }
 }

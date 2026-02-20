@@ -31,11 +31,17 @@ export const STREAK_BONUS = [0, 0, 1, 1, 2, 2, 3]; // index = streak count, 3 ma
 
 // ── Element System ──────────────────────────────────────
 
-export const UPGRADE_COST_T1 = 3;                // Cost to apply first element
-export const UPGRADE_COST_T2 = 5;                // Cost to apply second element
+export const UPGRADE_COST_T1 = 0;                // Cost to apply first element (free, only consume fragment)
+export const UPGRADE_COST_T2 = 0;                // Cost to apply second element (free, only consume fragment)
 export const ELEMENT_DAMAGE_BONUS = [0, 0, 0.15, 0.30]; // Damage bonus per element point (0-3)
-export const CRYSTAL_SHOP_CHANCE = 0.2;          // 20% chance a shop slot contains a crystal
-export const CRYSTAL_COST = 4;                   // Cost of element crystals in shop
+
+// ── Fragment System ─────────────────────────────────────
+
+export const FRAGMENT_POOL_SIZE = 12;            // fragments per element in shared pool
+export const FRAGMENT_BASE_COST = 3;             // base cost of fragments
+export const FRAGMENT_COST_SCALE = [3, 3, 4, 5, 6, 6, 6, 6, 6, 6, 6, 6]; // cost by totalBought index
+export const SHOP_FRAGMENT_CHANCE = 0.6;         // 60% chance a shop slot contains a fragment
+export const SHOP_TOWER_CHANCE = 0.4;            // 40% chance a shop slot contains a base tower
 
 // ── Tower Costs ─────────────────────────────────────────
 

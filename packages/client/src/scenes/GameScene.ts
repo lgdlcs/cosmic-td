@@ -8,6 +8,7 @@ import type {
   MobInstance,
   CombatAttack,
   GridPos,
+  Element,
 } from '@ect/shared';
 import {
   GRID_SIZE,
@@ -16,8 +17,8 @@ import {
   TOWER_MAP,
   PLAYER_COLOR_HEX,
   isPathCell,
-  ELEMENT_CRYSTALS,
   getTowerStats,
+  getFragmentCost,
   ELEMENTS,
 } from '@ect/shared';
 
@@ -250,88 +251,9 @@ export class GameScene extends Phaser.Scene {
     this.msgHandler = (msg) => this.handleMsg(msg);
     socket.onMessage(this.msgHandler);
     this.updateUI();
-    this.checkElementChoice();
   }
   
-  private checkElementChoice() {
-    const me = this.me();
-    if (!me || !me.pendingElementPoint) {
-      // Hide element choice overlay if shown
-      if (this.elementChoiceOverlay) {
-        this.elementChoiceOverlay.destroy();
-        this.elementChoiceOverlay = null;
-      }
-      return;
-    }
-
-    if (this.elementChoiceOverlay) return; // Already shown
-
-    // Create element choice overlay
-    const cx = this.cameras.main.centerX;
-    const cy = this.cameras.main.centerY - 100;
-    
-    this.elementChoiceOverlay = this.add.container(cx, cy);
-    
-    // Background
-    const bg = this.add.rectangle(0, 0, 600, 200, 0x1a1a2e, 0.95);
-    bg.setStrokeStyle(3, 0xffd93d);
-    this.elementChoiceOverlay.add(bg);
-    
-    // Title
-    const title = this.add.text(0, -60, '⚡ CHOOSE YOUR ELEMENT! +1 POINT', {
-      fontSize: '24px',
-      color: '#ffd93d',
-      fontStyle: 'bold',
-    }).setOrigin(0.5);
-    this.elementChoiceOverlay.add(title);
-    
-    // Element buttons
-    ELEMENTS.forEach((element, i) => {
-      const x = (i - 2.5) * 90;
-      const symbol = ELEMENT_SYMBOLS[element];
-      const color = ELEMENT_COLORS[element];
-      const currentPoints = me.elementPoints[element] || 0;
-      const canChoose = currentPoints < 3;
-      
-      const btn = this.add.rectangle(x, 10, 70, 60, Phaser.Display.Color.HexStringToColor(color).color, canChoose ? 0.8 : 0.3);
-      btn.setStrokeStyle(2, canChoose ? 0xffffff : 0x666666);
-      
-      const text = this.add.text(x, -5, `${symbol}\n${currentPoints}/3`, {
-        fontSize: '14px',
-        color: canChoose ? '#ffffff' : '#666666',
-        align: 'center',
-        fontStyle: 'bold',
-      }).setOrigin(0.5);
-      
-      if (this.elementChoiceOverlay) {
-        this.elementChoiceOverlay.add(btn);
-        this.elementChoiceOverlay.add(text);
-      }
-      
-      if (canChoose) {
-        btn.setInteractive({ useHandCursor: true });
-        btn.on('pointerdown', () => {
-          socket.send({ type: 'CHOOSE_ELEMENT', element });
-          if (this.elementChoiceOverlay) {
-            this.elementChoiceOverlay.destroy();
-            this.elementChoiceOverlay = null;
-          }
-        });
-        
-        btn.on('pointerover', () => {
-          btn.setAlpha(1);
-          btn.setStrokeStyle(3, 0xffd93d);
-        });
-        
-        btn.on('pointerout', () => {
-          btn.setAlpha(0.8);
-          btn.setStrokeStyle(2, 0xffffff);
-        });
-      }
-    });
-    
-    this.elementChoiceOverlay.setDepth(20);
-  }
+  // Element choice overlay removed - fragments are bought directly from shop
 
   private showUpgradeMenu(tower: any, x: number, y: number) {
     this.hideUpgradeMenu();
@@ -342,17 +264,13 @@ export class GameScene extends Phaser.Scene {
     this.upgradeTowerInstance = tower.instanceId;
     this.upgradeMenu = this.add.container(x, y);
     
-    const isT1Upgrade = tower.appliedElements.length === 0;
-    const cost = isT1Upgrade ? 3 : 5;
-    const minPointsRequired = isT1Upgrade ? 1 : 2;
-    
     // Background circle
     const bg = this.add.circle(0, 0, 80, 0x1a1a2e, 0.9);
     bg.setStrokeStyle(2, 0xffd93d);
     this.upgradeMenu.add(bg);
     
     // Title
-    const title = this.add.text(0, 0, `Upgrade\n${cost}g`, {
+    const title = this.add.text(0, 0, `Upgrade\n(Free)`, {
       fontSize: '12px',
       color: '#ffd93d',
       align: 'center',
@@ -367,9 +285,9 @@ export class GameScene extends Phaser.Scene {
       const btnX = Math.cos(angle) * radius;
       const btnY = Math.sin(angle) * radius;
       
-      const playerPoints = me.elementPoints[element] || 0;
+      const playerFragments = me.fragments[element] || 0;
       const alreadyApplied = tower.appliedElements.includes(element);
-      const canApply = playerPoints >= minPointsRequired && !alreadyApplied && me.gold >= cost;
+      const canApply = playerFragments >= 1 && !alreadyApplied;
       
       const color = Phaser.Display.Color.HexStringToColor(ELEMENT_COLORS[element]).color;
       const btn = this.add.circle(btnX, btnY, 18, color, canApply ? 0.8 : 0.3);
@@ -384,12 +302,20 @@ export class GameScene extends Phaser.Scene {
         }).setOrigin(0.5);
         if (this.upgradeMenu) this.upgradeMenu.add(check);
       } else {
-        const symbol = this.add.text(btnX, btnY, ELEMENT_SYMBOLS[element], {
+        const symbol = this.add.text(btnX, btnY - 8, ELEMENT_SYMBOLS[element], {
           fontSize: '12px',
           color: canApply ? '#ffffff' : '#666666',
           fontStyle: 'bold',
         }).setOrigin(0.5);
-        if (this.upgradeMenu) this.upgradeMenu.add(symbol);
+        const count = this.add.text(btnX, btnY + 8, `×${playerFragments}`, {
+          fontSize: '10px',
+          color: canApply ? '#ffffff' : '#666666',
+          fontStyle: 'bold',
+        }).setOrigin(0.5);
+        if (this.upgradeMenu) {
+          this.upgradeMenu.add(symbol);
+          this.upgradeMenu.add(count);
+        }
       }
       
       if (this.upgradeMenu) this.upgradeMenu.add(btn);
@@ -476,7 +402,6 @@ export class GameScene extends Phaser.Scene {
       case 'STATE_UPDATE':
         this.gameState = msg.state;
         this.updateUI();
-        this.checkElementChoice();
         break;
 
       case 'PHASE_CHANGE':
@@ -709,7 +634,7 @@ export class GameScene extends Phaser.Scene {
           const me = this.me();
           if (!me) return;
           
-          const towerStats = getTowerStats(def, tower.appliedElements, me.elementPoints);
+          const towerStats = getTowerStats(def, tower.appliedElements, me.totalBought);
           
           const elems = tower.appliedElements.length > 0 
             ? tower.appliedElements.map(e => `${ELEMENT_SYMBOLS[e]}${e}`).join(', ')
@@ -1057,7 +982,7 @@ export class GameScene extends Phaser.Scene {
       const size = 20;
 
       // Calculate actual range using tower stats
-      const towerStats = getTowerStats(def, tower.appliedElements, me.elementPoints);
+      const towerStats = getTowerStats(def, tower.appliedElements, me.totalBought);
       const actualRange = towerStats.range;
       
       // Range circle — prominent when hovered, subtle otherwise
@@ -1273,11 +1198,13 @@ export class GameScene extends Phaser.Scene {
       if (defId) {
         const def = TOWER_MAP[defId];
         // Check if it's a crystal or base tower
-        const crystal = ELEMENT_CRYSTALS.find(c => c.id === defId);
-        if (crystal) {
-          const symbol = ELEMENT_SYMBOLS[crystal.element];
-          const displayText = `${symbol} Crystal\n${crystal.cost}g`;
-          const textColor = isSelected ? '#ffd93d' : (ELEMENT_COLORS[crystal.element] || '#eee');
+        // Check if it's a fragment (format: "fragment:<element>")
+        if (defId && defId.startsWith('fragment:')) {
+          const element = defId.replace('fragment:', '') as keyof typeof ELEMENT_SYMBOLS;
+          const symbol = ELEMENT_SYMBOLS[element];
+          const cost = getFragmentCost(element, me.totalBought[element] || 0);
+          const displayText = `${symbol} Fragment\n${cost}g`;
+          const textColor = isSelected ? '#ffd93d' : (ELEMENT_COLORS[element] || '#eee');
           const bgColor = isSelected ? '#4a4a0a' : '#0f3460';
           
           this.uiShopSlots[i]
@@ -1302,35 +1229,41 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Element points display
+    // Fragment inventory display
     const parts: string[] = [];
-    for (const [elem, points] of Object.entries(me.elementPoints)) {
-      const sym = ELEMENT_SYMBOLS[elem as keyof typeof ELEMENT_SYMBOLS] || elem;
+    for (const elem of ELEMENTS) {
+      const sym = ELEMENT_SYMBOLS[elem];
+      const count = me.fragments[elem] || 0;
+      const bought = me.totalBought[elem] || 0;
       let bonus = '';
       let highlight = false;
       
-      if (points >= 3) {
+      if (bought >= 3) {
         bonus = ' +30%DMG';
         highlight = true;
-      } else if (points >= 2) {
-        bonus = ' +15%DMG';
+      } else if (bought >= 2) {
+        bonus = ' +15%DMG'; 
         highlight = true;
-      } else if (points >= 1) {
+      } else if (bought >= 1) {
         bonus = ' UNLOCKED';
       }
       
-      const text = `${sym}×${points}${bonus}`;
-      parts.push(highlight ? `[${text}]` : text);
+      const text = `${sym}×${count}${bonus}`;
+      const style = count > 0 ? (highlight ? `[${text}]` : text) : `${sym}×0`;
+      parts.push(style);
     }
     
     let statusText = '';
-    if (me.pendingElementPoint) {
-      statusText = '⚡ CHOOSE ELEMENT FIRST!';
-    } else if (this.selectedShopIndex >= 0) {
-      statusText = '— Click grid to place tower';
+    if (this.selectedShopIndex >= 0) {
+      const defId = me.shop[this.selectedShopIndex];
+      if (defId && defId.startsWith('fragment:')) {
+        statusText = '— Click to buy fragment';
+      } else {
+        statusText = '— Click grid to place tower';
+      }
     }
     
-    this.uiSynergy.setText(`Elements: ${parts.join('  ')}  ${statusText}`);
+    this.uiSynergy.setText(`Fragments: ${parts.join('  ')}  ${statusText}`);
 
     // Opponents
     const opponents = this.gameState.players.filter((p) => p.id !== this.myId);
@@ -1370,13 +1303,27 @@ export class GameScene extends Phaser.Scene {
     const me = this.me();
     if (!me || !me.shop[shopIndex]) return;
     
-    // Toggle selection
+    const defId = me.shop[shopIndex];
+    
+    // If it's a fragment, buy it directly
+    if (defId && defId.startsWith('fragment:')) {
+      const element = defId.replace('fragment:', '') as Element;
+      const cost = getFragmentCost(element, me.totalBought[element] || 0);
+      
+      if (me.gold >= cost) {
+        socket.send({ type: 'BUY_FRAGMENT', shopIndex });
+        // Visual feedback would be nice here
+      }
+      return;
+    }
+    
+    // Otherwise it's a tower, handle selection for placement
     if (this.selectedShopIndex === shopIndex) {
       this.selectedShopIndex = -1;
       this.selectedTowerDefId = null;
     } else {
       this.selectedShopIndex = shopIndex;
-      this.selectedTowerDefId = me.shop[shopIndex];
+      this.selectedTowerDefId = defId;
     }
     
     this.updateUI();

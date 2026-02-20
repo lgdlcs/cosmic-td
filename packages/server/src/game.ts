@@ -75,8 +75,8 @@ export class Game {
       xp: 0,
       xpToNext: 0, // No longer used
       towers: [],
-      elementPoints: Object.fromEntries(ELEMENTS.map((e) => [e, 0])) as Record<Element, number>,
-      pendingElementPoint: false, // No pending point on round 1
+      fragments: Object.fromEntries(ELEMENTS.map((e) => [e, 0])) as Record<Element, number>,
+      totalBought: Object.fromEntries(ELEMENTS.map((e) => [e, 0])) as Record<Element, number>,
       shop: Array(SHOP_SLOTS).fill(null),
       synergies: Object.fromEntries(ELEMENTS.map((e) => [e, 0])) as Record<Element, number>, // For compatibility
       streak: 0,
@@ -123,23 +123,7 @@ export class Game {
         if (msg.position.row < 0 || msg.position.row >= 8 || msg.position.col < 0 || msg.position.col >= 8) return;
         if (player.towers.some((t) => t.position.row === msg.position.row && t.position.col === msg.position.col)) return;
 
-        // Check if it's a crystal
-        if (this.shop.isCrystal(itemId)) {
-          const crystal = this.shop.getCrystal(itemId);
-          if (!crystal) return;
-          
-          if (player.gold < crystal.cost) return;
-          if (player.elementPoints[crystal.element] >= 3) return; // Max 3 points per element
-
-          player.gold -= crystal.cost;
-          player.elementPoints[crystal.element]++;
-          player.shop[msg.shopIndex] = null;
-
-          this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
-          this.broadcastStateUpdate();
-          return;
-        }
-
+        // Only handle base towers in BUY_AND_PLACE, fragments are handled in BUY_FRAGMENT
         // It's a base tower
         const def = TOWER_MAP[itemId];
         if (!def) return;
@@ -164,15 +148,12 @@ export class Game {
         this.broadcastStateUpdate();
         break;
       }
-      case 'CHOOSE_ELEMENT': {
+      case 'BUY_FRAGMENT': {
         if (this.state.phase !== 'shopping') return;
-        if (!player.pendingElementPoint) return; // Player doesn't have a pending point
-        if (player.elementPoints[msg.element] >= 3) return; // Already at max for this element
-
-        player.elementPoints[msg.element]++;
-        player.pendingElementPoint = false;
-
-        this.broadcastStateUpdate();
+        if (this.shop.buyFragment(player, msg.shopIndex)) {
+          this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
+          this.broadcastStateUpdate();
+        }
         break;
       }
       case 'UPGRADE_TOWER': {
@@ -183,20 +164,14 @@ export class Game {
         // Check if tower already has 2 elements (max)
         if (tower.appliedElements.length >= 2) return;
 
-        // Check if player has enough points in this element
-        const isT1Upgrade = tower.appliedElements.length === 0;
-        const minPointsRequired = isT1Upgrade ? 1 : 2;
-        if (player.elementPoints[msg.element] < minPointsRequired) return;
+        // Check if player has enough fragments in this element
+        if (player.fragments[msg.element] < 1) return;
 
         // Check if element is already applied
         if (tower.appliedElements.includes(msg.element)) return;
 
-        // Check gold
-        const cost = isT1Upgrade ? UPGRADE_COST_T1 : UPGRADE_COST_T2;
-        if (player.gold < cost) return;
-
-        // Apply upgrade
-        player.gold -= cost;
+        // Apply upgrade - free, just consume 1 fragment
+        player.fragments[msg.element]--;
         tower.appliedElements.push(msg.element);
 
         this.broadcastStateUpdate();
@@ -352,13 +327,6 @@ export class Game {
     this.state.players.filter((p) => p.alive).forEach((p) => {
       p.shop = this.shop.generateShop(p);
     });
-
-    // Grant element point choice (except round 1)
-    if (this.state.round > 1) {
-      this.state.players.filter((p) => p.alive).forEach((p) => {
-        p.pendingElementPoint = true;
-      });
-    }
 
     this.broadcast({
       type: 'PHASE_CHANGE',

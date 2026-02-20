@@ -108,10 +108,10 @@ export interface PlayerState {
   xp: number;
   xpToNext: number;
   towers: TowerInstance[];
-  elementPoints: Record<Element, number>;  // 0-3 points per element
-  pendingElementPoint: boolean;            // true if player must choose an element this round
+  fragments: Record<Element, number>;      // fragments in bank, available to consume
+  totalBought: Record<Element, number>;    // total fragments bought historically (for price scaling)
   shop: (string | null)[];                // 5 shop slots, defIds or null
-  synergies: Record<Element, number>;     // kept for compatibility, calculated from elementPoints
+  synergies: Record<Element, number>;     // kept for compatibility, calculated from fragments
   streak: number;
   alive: boolean;
   incomingHex: HexCast | null;
@@ -146,8 +146,8 @@ export type ClientMsg =
   | { type: 'JOIN_LOBBY'; name: string; roomCode?: string }
   | { type: 'READY' }
   | { type: 'BUY_AND_PLACE'; shopIndex: number; position: GridPos }
+  | { type: 'BUY_FRAGMENT'; shopIndex: number }
   | { type: 'SELL_TOWER'; instanceId: string }
-  | { type: 'CHOOSE_ELEMENT'; element: Element }
   | { type: 'UPGRADE_TOWER'; instanceId: string; element: Element }
   | { type: 'REROLL' }
   | { type: 'CAST_HEX'; hexId: HexId; targetPlayerId: string }

@@ -40,23 +40,21 @@ export const BASE_TOWERS: TowerDef[] = [
   },
 ];
 
-// ── Element Crystal Definitions ────────────────────────────
+// ── Fragment System ─────────────────────────────────────────
 
-export interface ElementCrystal {
-  id: string;
+export interface ElementFragment {
   element: Element;
   name: string;
-  cost: number;
+  cost: number;  // calculated dynamically based on player's totalBought
 }
 
-export const ELEMENT_CRYSTALS: ElementCrystal[] = [
-  { id: 'fire_crystal', element: 'fire', name: 'Fire Crystal', cost: 4 },
-  { id: 'water_crystal', element: 'water', name: 'Water Crystal', cost: 4 },
-  { id: 'earth_crystal', element: 'earth', name: 'Earth Crystal', cost: 4 },
-  { id: 'wind_crystal', element: 'wind', name: 'Wind Crystal', cost: 4 },
-  { id: 'light_crystal', element: 'light', name: 'Light Crystal', cost: 4 },
-  { id: 'dark_crystal', element: 'dark', name: 'Dark Crystal', cost: 4 },
-];
+// Function to get fragment cost based on how many the player already bought
+export function getFragmentCost(element: Element, totalBought: number): number {
+  if (totalBought < 2) return 3;
+  if (totalBought < 3) return 4;  
+  if (totalBought < 4) return 5;
+  return 6;
+}
 
 // ── Element Effects ──────────────────────────────────────────
 
@@ -145,12 +143,12 @@ export interface TowerStats {
 }
 
 /**
- * Calculate final tower stats based on base tower + applied elements + element points
+ * Calculate final tower stats based on base tower + applied elements + total fragments bought
  */
 export function getTowerStats(
   baseDef: TowerDef, 
   appliedElements: Element[], 
-  elementPoints: Record<Element, number>
+  totalBought: Record<Element, number>
 ): TowerStats {
   let damage = baseDef.damage;
   let attackSpeed = baseDef.attackSpeed;
@@ -160,15 +158,16 @@ export function getTowerStats(
   // Apply element bonuses
   for (const element of appliedElements) {
     const effect = ELEMENT_EFFECTS[element];
-    const points = elementPoints[element] || 0;
+    const bought = totalBought[element] || 0;
     
     // Element-specific bonuses
     damage += baseDef.damage * effect.damageBonus;
     attackSpeed += baseDef.attackSpeed * effect.attackSpeedBonus;
     range += effect.rangeBonus;
     
-    // Global element points damage bonus
-    const pointsBonus = ELEMENT_DAMAGE_BONUS[points] || 0;
+    // Global element investment damage bonus based on total bought (capped at 3 for ELEMENT_DAMAGE_BONUS)
+    const cappedPoints = Math.min(bought, 3);
+    const pointsBonus = ELEMENT_DAMAGE_BONUS[cappedPoints] || 0;
     damage += baseDef.damage * pointsBonus;
     
     effects.push(effect);
