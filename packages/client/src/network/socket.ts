@@ -17,6 +17,17 @@ class GameSocket {
     return this.connected && this.ws?.readyState === WebSocket.OPEN;
   }
 
+  /** Force a fresh connection (close existing if any) */
+  reconnect(): Promise<void> {
+    if (this.ws) {
+      this.ws.onclose = null; // prevent log spam
+      this.ws.close();
+      this.ws = null;
+      this.connected = false;
+    }
+    return this.connect();
+  }
+
   connect(): Promise<void> {
     if (this.isConnected()) return Promise.resolve();
 

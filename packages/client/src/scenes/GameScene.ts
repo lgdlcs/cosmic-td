@@ -376,9 +376,9 @@ export class GameScene extends Phaser.Scene {
     const me = this.me();
     if (!me) return;
 
-    // Top bar
+    // Top bar — keep it short, streak on right side
     this.uiTopBar.setText(
-      `❤️ ${me.hp}   💰 ${me.gold}   Lv.${me.level} (${me.xp}/${me.xpToNext} XP)   🔥 ${me.streak}`
+      `❤️ ${me.hp}   💰 ${me.gold}   Lv.${me.level} (${me.xp}/${me.xpToNext})`
     );
 
     this.updatePhaseText();
@@ -445,9 +445,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updatePhaseText() {
+    const me = this.me();
+    const streak = me ? me.streak : 0;
     const phase = this.gameState.phase === 'shopping' ? '🛒 SHOP' : '⚔️ COMBAT';
-    const timer = this.gameState.phase === 'shopping' ? `  ⏱ ${this.localTimer}s` : '';
-    this.uiPhase.setText(`R${this.gameState.round}/30  ${phase}${timer}`);
+    const timer = this.gameState.phase === 'shopping' && this.localTimer > 0
+      ? `⏱ ${this.localTimer}s`
+      : '';
+    this.uiPhase.setText(`R${this.gameState.round}/30  ${phase}  ${timer}  🔥${streak}`);
   }
 
   // ── Actions ───────────────────────────────────────────

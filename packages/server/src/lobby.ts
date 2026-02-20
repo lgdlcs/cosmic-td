@@ -37,6 +37,18 @@ function broadcastLobby(room: Room) {
 export function handleMessage(client: Client, msg: ClientMsg) {
   switch (msg.type) {
     case 'JOIN_LOBBY': {
+      // Clean up any previous room
+      if (client.roomCode) {
+        const oldRoom = rooms.get(client.roomCode);
+        if (oldRoom) {
+          oldRoom.clients = oldRoom.clients.filter((c) => c.id !== client.id);
+          oldRoom.names.delete(client.id);
+          oldRoom.ready.delete(client.id);
+          if (oldRoom.clients.length === 0) rooms.delete(client.roomCode);
+        }
+        client.roomCode = null;
+      }
+
       let room: Room;
 
       if (msg.roomCode) {

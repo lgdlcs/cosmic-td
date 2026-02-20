@@ -93,8 +93,11 @@ export class Game {
     this.shop = new ShopManager(this.state);
     this.combat = new CombatManager(this.state, this.map);
     this.economy = new EconomyManager(this.state);
+    // Don't start yet — wait for createGame to send GAME_START first
+  }
 
-    // Start the game
+  /** Called after GAME_START is sent to clients */
+  start() {
     this.startNextRound();
   }
 
@@ -393,6 +396,9 @@ export class Game {
 
   endGame() {
     this.state.phase = 'gameOver';
+    if (this.tickInterval) clearInterval(this.tickInterval);
+    if (this.phaseTimer) clearInterval(this.phaseTimer);
+
     const alive = this.state.players.filter((p) => p.alive);
     const winner = alive.length > 0
       ? alive.reduce((a, b) => (a.hp >= b.hp ? a : b))
@@ -400,6 +406,11 @@ export class Game {
 
     this.state.winner = winner.id;
     this.broadcast({ type: 'GAME_OVER', winnerId: winner.id });
+
+    // Cleanup player→game mappings so they can rejoin lobby
+    this.clients.forEach((_, playerId) => {
+      playerToGame.delete(playerId);
+    });
   }
 }
 
@@ -429,4 +440,7 @@ export function createGame(clients: Client[], names: Map<string, string>) {
       mapDef: game.map,
     });
   });
+
+  // Small delay to let clients set up before first phase
+  setTimeout(() => game.start(), 200);
 }
