@@ -8,6 +8,8 @@ export class LobbyScene extends Phaser.Scene {
   private playerTexts: Phaser.GameObjects.Text[] = [];
   private statusText!: Phaser.GameObjects.Text;
   private roomCodeText!: Phaser.GameObjects.Text;
+  private myId: string = '';
+  private domElements: HTMLElement[] = [];
 
   constructor() {
     super({ key: 'LobbyScene' });
@@ -31,6 +33,9 @@ export class LobbyScene extends Phaser.Scene {
     // Name input
     this.add.text(cx - 120, 180, 'Your name:', { fontSize: '16px', color: '#ccc' });
     this.nameInput = this.createInput(cx + 20, 175, 'Enter name...', 160);
+    // Restore from localStorage
+    const savedName = localStorage.getItem('ect_playerName');
+    if (savedName) this.nameInput.value = savedName;
 
     // Room code
     this.add.text(cx - 120, 230, 'Room code:', { fontSize: '16px', color: '#ccc' });
@@ -62,15 +67,21 @@ export class LobbyScene extends Phaser.Scene {
       );
     }
 
-    // Connect & listen
-    socket.connect().then(() => {
+    // Connect & listen (only if not already connected)
+    const setupListeners = () => {
       socket.onMessage((msg) => this.handleMsg(msg));
-    });
+    };
+
+    if (!socket.isConnected()) {
+      socket.connect().then(setupListeners);
+    } else {
+      setupListeners();
+    }
   }
 
-  private myId: string = '';
-
   private handleMsg(msg: ServerMsg) {
+    if (!this.scene.isActive('LobbyScene')) return;
+
     switch (msg.type) {
       case 'YOUR_ID':
         this.myId = msg.id;
@@ -80,6 +91,7 @@ export class LobbyScene extends Phaser.Scene {
         this.updatePlayerList(msg.players);
         break;
       case 'GAME_START':
+        this.cleanupDOM();
         this.scene.start('GameScene', { state: msg.state, mapDef: msg.mapDef, myId: this.myId });
         break;
       case 'ERROR':
@@ -104,6 +116,7 @@ export class LobbyScene extends Phaser.Scene {
 
   private joinLobby() {
     const name = this.nameInput.value.trim() || 'Player';
+    localStorage.setItem('ect_playerName', name);
     const code = this.codeInput.value.trim() || undefined;
     socket.send({ type: 'JOIN_LOBBY', name, roomCode: code });
   }
@@ -113,6 +126,7 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   private createInput(x: number, y: number, placeholder: string, width: number): HTMLInputElement {
+    const container = document.getElementById('game-container')!;
     const input = document.createElement('input');
     input.type = 'text';
     input.placeholder = placeholder;
@@ -120,14 +134,15 @@ export class LobbyScene extends Phaser.Scene {
       position: absolute; left: ${x}px; top: ${y}px; width: ${width}px;
       background: #0f3460; color: #eee; border: 1px solid #4EA8DE;
       padding: 6px 10px; border-radius: 4px; font-size: 14px;
-      font-family: inherit; outline: none;
+      font-family: inherit; outline: none; z-index: 10;
     `;
-    document.getElementById('game-container')!.appendChild(input);
+    container.appendChild(input);
+    this.domElements.push(input);
     return input;
   }
 
   private createButton(x: number, y: number, label: string, onClick: () => void) {
-    const btn = this.add.text(x, y, label, {
+    this.add.text(x, y, label, {
       fontSize: '16px',
       color: '#1a1a2e',
       backgroundColor: '#FFD93D',
@@ -135,14 +150,17 @@ export class LobbyScene extends Phaser.Scene {
     })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true })
-      .on('pointerover', () => btn.setStyle({ color: '#000' }))
-      .on('pointerout', () => btn.setStyle({ color: '#1a1a2e' }))
+      .on('pointerover', (function(this: Phaser.GameObjects.Text) { this.setStyle({ color: '#000' }); }))
+      .on('pointerout', (function(this: Phaser.GameObjects.Text) { this.setStyle({ color: '#1a1a2e' }); }))
       .on('pointerdown', onClick);
   }
 
+  private cleanupDOM() {
+    this.domElements.forEach((el) => el.remove());
+    this.domElements = [];
+  }
+
   shutdown() {
-    // Clean up DOM inputs
-    this.nameInput?.remove();
-    this.codeInput?.remove();
+    this.cleanupDOM();
   }
 }

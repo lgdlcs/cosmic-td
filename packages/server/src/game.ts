@@ -280,6 +280,9 @@ export class Game {
         this.startCombat();
       }
     }, 1000);
+
+    // Also stagger mob spawns so they don't all overlap
+    // (handled in spawnWave with delay offsets)
   }
 
   startCombat() {

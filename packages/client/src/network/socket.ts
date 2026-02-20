@@ -6,27 +6,37 @@ class GameSocket {
   private ws: WebSocket | null = null;
   private handlers: MsgHandler[] = [];
   private url: string;
+  private connected = false;
 
   constructor() {
     const host = window.location.hostname || 'localhost';
     this.url = `ws://${host}:3001`;
   }
 
+  isConnected(): boolean {
+    return this.connected && this.ws?.readyState === WebSocket.OPEN;
+  }
+
   connect(): Promise<void> {
+    if (this.isConnected()) return Promise.resolve();
+
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.url);
 
       this.ws.onopen = () => {
         console.log('[ws] Connected');
+        this.connected = true;
         resolve();
       };
 
       this.ws.onclose = () => {
         console.log('[ws] Disconnected');
+        this.connected = false;
       };
 
       this.ws.onerror = (e) => {
         console.error('[ws] Error', e);
+        this.connected = false;
         reject(e);
       };
 
@@ -53,6 +63,11 @@ class GameSocket {
 
   offMessage(handler: MsgHandler) {
     this.handlers = this.handlers.filter((h) => h !== handler);
+  }
+
+  /** Remove all handlers (scene transition cleanup) */
+  clearHandlers() {
+    this.handlers = [];
   }
 }
 

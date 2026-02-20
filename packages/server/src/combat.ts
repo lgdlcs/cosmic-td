@@ -52,13 +52,15 @@ export class CombatManager {
 
     for (let i = 0; i < count + extraMobs; i++) {
       const entry = this.map.entry;
+      // Stagger spawn: each mob starts slightly behind the entry
+      const staggerOffset = i * 0.6; // 0.6 cells apart
       mobs.push({
         instanceId: nanoid(8),
         defId: isBoss ? 'boss' : 'grunt',
         hp,
         maxHp: hp,
         x: entry.col,
-        y: entry.row,
+        y: entry.row - staggerOffset, // queue them above entry
         pathIndex: 0,
         effects: hasHaste ? [{ type: 'slow', remaining: 99999, value: -0.3 }] : [],
         visible: true,
