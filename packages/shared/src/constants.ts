@@ -6,7 +6,7 @@ export const GRID_SIZE = 8;
 export const MAX_PLAYERS = 4;
 export const MIN_PLAYERS = 1; // dev mode, set to 2 for production
 export const STARTING_HP = 100;
-export const STARTING_GOLD = 50; // generous for testing, lower for production
+export const STARTING_GOLD = 15;
 export const STARTING_LEVEL = 1;
 export const MAX_LEVEL = 6;
 export const SHOP_SLOTS = 5;
@@ -110,9 +110,9 @@ export const PLAYER_COLOR_HEX = {
 
 // ── Mob Scaling ─────────────────────────────────────────
 
-export const MOB_BASE_HP = 30;
-export const MOB_HP_SCALE = 1.15;              // HP multiplier per round
-export const MOB_COUNT_BASE = 8;
-export const MOB_COUNT_SCALE = 0.5;            // +0.5 mobs per round (floored)
+export const MOB_BASE_HP = 80;
+export const MOB_HP_SCALE = 1.18;              // HP multiplier per round
+export const MOB_COUNT_BASE = 6;
+export const MOB_COUNT_SCALE = 0.4;            // +0.4 mobs per round (floored)
 export const BOSS_ROUNDS = [5, 10, 15, 20, 25, 30];
 export const BOSS_HP_MULT = 8;
