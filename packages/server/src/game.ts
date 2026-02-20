@@ -16,6 +16,7 @@ import {
   STARTING_HP,
   STARTING_GOLD,
   STARTING_LEVEL,
+  GRID_SIZE,
   SHOP_SLOTS,
   PLAYER_COLORS,
   ALL_MAPS,
@@ -113,14 +114,14 @@ export class Game {
 
     switch (msg.type) {
       case 'BUY_AND_PLACE': {
-        if (this.state.phase !== 'shopping') return;
+        if (this.state.phase === 'gameOver' || this.state.phase === 'lobby') return;
         if (msg.shopIndex < 0 || msg.shopIndex >= SHOP_SLOTS) return;
         const itemId = player.shop[msg.shopIndex];
         if (!itemId) return;
         
         // Validate position
         if (isPathCell(this.map, msg.position)) return;
-        if (msg.position.row < 0 || msg.position.row >= 8 || msg.position.col < 0 || msg.position.col >= 8) return;
+        if (msg.position.row < 0 || msg.position.row >= GRID_SIZE || msg.position.col < 0 || msg.position.col >= GRID_SIZE) return;
         if (player.towers.some((t) => t.position.row === msg.position.row && t.position.col === msg.position.col)) return;
 
         // Only handle base towers in BUY_AND_PLACE, fragments are handled in BUY_FRAGMENT
@@ -149,7 +150,7 @@ export class Game {
         break;
       }
       case 'BUY_FRAGMENT': {
-        if (this.state.phase !== 'shopping') return;
+        if (this.state.phase === 'gameOver' || this.state.phase === 'lobby') return;
         if (this.shop.buyFragment(player, msg.shopIndex)) {
           this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
           this.broadcastStateUpdate();
@@ -157,7 +158,7 @@ export class Game {
         break;
       }
       case 'UPGRADE_TOWER': {
-        if (this.state.phase !== 'shopping') return;
+        if (this.state.phase === 'gameOver' || this.state.phase === 'lobby') return;
         const tower = player.towers.find((t) => t.instanceId === msg.instanceId);
         if (!tower) return;
 
@@ -178,27 +179,27 @@ export class Game {
         break;
       }
       case 'SELL_TOWER': {
-        if (this.state.phase !== 'shopping') return;
+        if (this.state.phase === 'gameOver' || this.state.phase === 'lobby') return;
         if (this.shop.sellTower(player, msg.instanceId)) {
           this.broadcastStateUpdate();
         }
         break;
       }
       case 'REROLL': {
-        if (this.state.phase !== 'shopping') return;
+        if (this.state.phase === 'gameOver' || this.state.phase === 'lobby') return;
         if (this.shop.reroll(player)) {
           this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
         }
         break;
       }
       case 'DEV_START_COMBAT': {
-        if (this.state.phase !== 'shopping') return;
+        if (this.state.phase === 'gameOver' || this.state.phase === 'lobby') return;
         if (this.phaseTimer) clearInterval(this.phaseTimer);
         this.startCombat();
         break;
       }
       case 'CAST_HEX': {
-        if (this.state.phase !== 'shopping') return;
+        if (this.state.phase === 'gameOver' || this.state.phase === 'lobby') return;
         const hex = HEX_MAP[msg.hexId];
         if (!hex) return;
         if (player.gold < hex.cost) return;
