@@ -8,9 +8,10 @@ export class GameOverScene extends Phaser.Scene {
     super({ key: 'GameOverScene' });
   }
 
-  init(data: { winnerId: string; players: PlayerState[] }) {
+  init(data: { winnerId: string; players: PlayerState[]; myId: string }) {
     this.data.set('winnerId', data.winnerId);
     this.data.set('players', data.players);
+    this.data.set('myId', data.myId);
   }
 
   create() {
@@ -18,18 +19,27 @@ export class GameOverScene extends Phaser.Scene {
     const cy = this.cameras.main.centerY;
     const winnerId = this.data.get('winnerId') as string;
     const players = this.data.get('players') as PlayerState[];
+    const myId = this.data.get('myId') as string;
     const winner = players.find((p) => p.id === winnerId);
+    const isMe = winnerId === myId;
 
-    this.add.text(cx, cy - 100, '🏆 GAME OVER', {
-      fontSize: '48px', color: '#FFD93D', fontStyle: 'bold',
+    // Title
+    this.add.text(cx, cy - 120, isMe ? '🏆 VICTORY!' : '💀 DEFEAT', {
+      fontSize: '48px',
+      color: isMe ? '#FFD93D' : '#ff4444',
+      fontStyle: 'bold',
     }).setOrigin(0.5);
 
+    // Winner announcement
     if (winner) {
-      this.add.text(cx, cy - 30, `${winner.name} wins!`, {
-        fontSize: '32px', color: PLAYER_COLOR_HEX[winner.color],
+      const msg = isMe ? 'You won!' : `${winner.name} wins!`;
+      this.add.text(cx, cy - 60, msg, {
+        fontSize: '28px',
+        color: PLAYER_COLOR_HEX[winner.color],
       }).setOrigin(0.5);
     }
 
+    // Leaderboard
     const sorted = [...players].sort((a, b) => {
       if (a.alive !== b.alive) return a.alive ? -1 : 1;
       return b.hp - a.hp;
@@ -37,21 +47,26 @@ export class GameOverScene extends Phaser.Scene {
 
     sorted.forEach((p, i) => {
       const status = p.alive ? `❤️ ${p.hp} HP` : '💀';
-      this.add.text(cx, cy + 30 + i * 35, `${i + 1}. ${p.name} — ${status}`, {
-        fontSize: '20px', color: PLAYER_COLOR_HEX[p.color],
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  ';
+      const isMyLine = p.id === myId;
+      this.add.text(cx, cy + 10 + i * 35, `${medal} ${p.name} — ${status}`, {
+        fontSize: '20px',
+        color: PLAYER_COLOR_HEX[p.color],
+        fontStyle: isMyLine ? 'bold' : 'normal',
       }).setOrigin(0.5);
     });
 
+    // Play Again button
     this.add.text(cx, cy + 200, '🔄 Play Again', {
-      fontSize: '20px', color: '#1a1a2e', backgroundColor: '#FFD93D',
+      fontSize: '20px',
+      color: '#1a1a2e',
+      backgroundColor: '#FFD93D',
       padding: { x: 20, y: 10 },
     })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true })
       .on('pointerdown', () => {
-        // Complete cleanup before going to lobby
         socket.clearHandlers();
-        // Force fresh connection to ensure clean state
         this.scene.start('LobbyScene', { forceReconnect: true });
       });
   }

@@ -106,7 +106,6 @@ export const SWARM_HP_MULT = 0.4;
 // ── Kill Rewards by Round Tier ──────────────────────────
 
 export const KILL_REWARD_TIERS = [
-  { maxRound: 10, gold: 1 },    // Rounds 1-10: +1g per kill
-  { maxRound: 20, gold: 2 },    // Rounds 11-20: +2g per kill  
-  { maxRound: 30, gold: 3 },    // Rounds 21-30: +3g per kill
+  { maxRound: 15, gold: 1 },    // Rounds 1-15: +1g per kill
+  { maxRound: 30, gold: 2 },    // Rounds 16-30: +2g per kill
 ];

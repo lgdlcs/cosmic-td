@@ -160,7 +160,8 @@ export type ClientMsg =
   | { type: 'UPGRADE_TOWER'; instanceId: string; element: Element }
   | { type: 'REROLL' }
   | { type: 'CAST_HEX'; hexId: HexId; targetPlayerId: string }
-  | { type: 'DEV_START_COMBAT' };
+  | { type: 'DEV_START_COMBAT' }
+  | { type: 'SET_SPEED'; speed: number };
 
 // Server → Client
 export type ServerMsg =
@@ -168,11 +169,12 @@ export type ServerMsg =
   | { type: 'LOBBY_UPDATE'; players: LobbyPlayer[]; roomCode: string; config: GameConfig; isHost: boolean }
   | { type: 'GAME_START'; state: GameState; mapDef: GameMap }
   | { type: 'PHASE_CHANGE'; phase: GamePhase; round: number; timer: number }
+  | { type: 'SPEED_CHANGE'; speed: number }
   | { type: 'STATE_UPDATE'; state: GameState }
   | { type: 'SHOP_UPDATE'; shop: (string | null)[]; gold: number }
   | { type: 'MOB_SYNC'; mobs: Record<string, MobInstance[]> }
   | { type: 'TOWER_ATTACK'; playerId: string; towerId: string; targetId: string; damage: number }
-  | { type: 'COMBAT_EVENTS'; playerId: string; attacks: CombatAttack[]; kills: string[]; leaks: string[] }
+  | { type: 'COMBAT_EVENTS'; playerId: string; attacks: CombatAttack[]; kills: CombatKill[]; leaks: string[] }
   | { type: 'MOB_KILLED'; playerId: string; mobId: string; goldReward: number }
   | { type: 'MOB_LEAKED'; playerId: string; mobId: string; damage: number; sentTo: string }
   | { type: 'HEX_INCOMING'; hex: HexCast }
@@ -189,6 +191,13 @@ export interface CombatAttack {
   damage: number;
   element: string;
   splash: boolean;
+}
+
+export interface CombatKill {
+  mobId: string;
+  x: number;
+  y: number;
+  gold: number;
 }
 
 export interface LobbyPlayer {

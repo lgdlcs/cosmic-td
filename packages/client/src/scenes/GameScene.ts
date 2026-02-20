@@ -116,6 +116,7 @@ interface DamageText {
   text: string;
   alpha: number;
   vy: number;
+  obj?: Phaser.GameObjects.Text;
 }
 
 interface LeakEffect {
@@ -264,6 +265,8 @@ export class GameScene extends Phaser.Scene {
   // Element choice overlay removed - fragments are bought directly from shop
 
   private upgradePreview: Phaser.GameObjects.Container | null = null;
+  private speedButtons: Phaser.GameObjects.Text[] = [];
+  private currentSpeed: number = 1;
 
   private showUpgradeMenu(tower: any, x: number, y: number) {
     this.hideUpgradeMenu();
@@ -462,6 +465,18 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private updateSpeedButtons() {
+    const speeds = [1, 2, 3, 5, 10];
+    this.speedButtons.forEach((btn, i) => {
+      const s = speeds[i];
+      const active = s === this.currentSpeed;
+      btn.setStyle({
+        color: active ? '#1a1a2e' : '#ccc',
+        backgroundColor: active ? '#FFD93D' : '#2a2a3e',
+      });
+    });
+  }
+
   private hideUpgradeMenu() {
     this.hideUpgradePreview();
     if (this.upgradeMenu) {
@@ -504,6 +519,15 @@ export class GameScene extends Phaser.Scene {
   // ── Network ───────────────────────────────────────────
 
   private handleMsg(msg: ServerMsg) {
+    if (msg.type === 'COMBAT_EVENTS') {
+      const m = msg as any;
+      const match = m.playerId === this.myId;
+      console.log(`[COMBAT] myId=${this.myId} msgPlayer=${m.playerId} match=${match} kills=${m.kills?.length} leaks=${m.leaks?.length}`);
+      if (m.kills?.length > 0) console.log('[COMBAT] kills:', JSON.stringify(m.kills));
+    }
+    if (msg.type === 'MOB_LEAKED') {
+      console.log('[LEAK]', msg);
+    }
     switch (msg.type) {
       case 'STATE_UPDATE':
         this.gameState = msg.state;
@@ -545,11 +569,26 @@ export class GameScene extends Phaser.Scene {
         }
         break;
 
+      case 'MOB_LEAKED':
+        if (msg.playerId === this.myId) {
+          const exit = this.mapDef.exit;
+          const lx = GRID_X + exit.col * CELL + CELL / 2;
+          const ly = GRID_Y + exit.row * CELL + CELL / 2;
+          this.spawnFloatingText(lx + (Math.random() - 0.5) * 15, ly - 15, `-${msg.damage} HP`, -25);
+        }
+        break;
+
+      case 'SPEED_CHANGE':
+        this.currentSpeed = msg.speed;
+        this.updateSpeedButtons();
+        break;
+
       case 'GAME_OVER':
         socket.clearHandlers();
         this.scene.start('GameOverScene', {
           winnerId: msg.winnerId,
           players: this.gameState.players,
+          myId: this.myId,
         });
         break;
     }
@@ -557,7 +596,7 @@ export class GameScene extends Phaser.Scene {
 
   // ── Combat Events → Visual Effects ────────────────────
 
-  private onCombatEvents(attacks: CombatAttack[], kills: string[], leaks: string[]) {
+  private onCombatEvents(attacks: CombatAttack[], kills: { mobId: string; x: number; y: number; gold: number }[], leaks: string[]) {
     // Play shoot sounds (throttled — max 3 per batch)
     for (const atk of attacks.slice(0, 3)) {
       sfx.towerShoot(atk.element);
@@ -581,14 +620,7 @@ export class GameScene extends Phaser.Scene {
         splash: atk.splash,
       });
 
-      // Damage number at target
-      this.damageTexts.push({
-        x: tx + (Math.random() - 0.5) * 20,
-        y: ty - 10,
-        text: `-${Math.round(atk.damage)}`,
-        alpha: 1,
-        vy: -40,
-      });
+      // Damage numbers removed — too noisy
 
       // Tower flash
       // (we don't have towerId mapped to position here, so flash is implicit via projectile origin)
@@ -597,28 +629,14 @@ export class GameScene extends Phaser.Scene {
     // Death effects + sounds for killed mobs
     if (kills.length > 0) sfx.mobDeath();
     if (kills.length > 0) sfx.goldReceived();
-    for (const mobId of kills) {
-      const mob = (this.gameState.mobs[this.myId] || []).find((m) => m.instanceId === mobId);
-      if (mob) {
-        const mx = GRID_X + mob.x * CELL + CELL / 2;
-        const my = GRID_Y + mob.y * CELL + CELL / 2;
-        this.deathEffects.push({
-          x: mx, y: my, radius: 8, alpha: 1, color: 0xFFD93D,
-        });
-        // Gold pop text (dynamic reward based on round)
-        const round = this.gameState.round;
-        let goldReward = 1;
-        if (round <= 10) goldReward = 1;
-        else if (round <= 20) goldReward = 2;
-        else goldReward = 3;
-        
-        this.damageTexts.push({
-          x: mx, y: my - 15,
-          text: `+${goldReward}g`,
-          alpha: 1,
-          vy: -30,
-        });
-      }
+    for (const kill of kills) {
+      const mx = GRID_X + kill.x * CELL + CELL / 2;
+      const my = GRID_Y + kill.y * CELL + CELL / 2;
+      this.deathEffects.push({
+        x: mx, y: my, radius: 8, alpha: 1, color: 0xFFD93D,
+      });
+      // Gold pop text
+      this.spawnFloatingText(mx + (Math.random() - 0.5) * 10, my - 15, `+${kill.gold}g`, -30);
     }
 
     // Leak effects
@@ -628,12 +646,7 @@ export class GameScene extends Phaser.Scene {
       const ex = GRID_X + exit.col * CELL + CELL / 2;
       const ey = GRID_Y + exit.row * CELL + CELL / 2;
       this.leakEffects.push({ x: ex, y: ey, alpha: 1 });
-      this.damageTexts.push({
-        x: ex, y: ey - 15,
-        text: '💔 LEAK',
-        alpha: 1,
-        vy: -25,
-      });
+      // Leak indicator is handled by MOB_LEAKED message
     }
   }
 
@@ -665,13 +678,44 @@ export class GameScene extends Phaser.Scene {
     this.deathEffects = this.deathEffects.filter((d) => d.alpha > 0);
   }
 
+  private spawnFloatingText(x: number, y: number, text: string, vy: number = -30) {
+    try {
+      const isGold = text.startsWith('+');
+      const isLeak = text.includes('HP');
+      const color = isGold ? '#FFD93D' : isLeak ? '#ff4444' : '#ffffff';
+      const fontSize = isGold ? 16 : 13;
+      const obj = this.add.text(x, y, text, {
+        fontSize: `${fontSize}px`,
+        color,
+        fontStyle: 'bold',
+        stroke: '#000000',
+        strokeThickness: 4,
+      }).setOrigin(0.5).setDepth(25);
+      this.damageTexts.push({ x, y, text, alpha: 1, vy, obj });
+      console.log(`[FLOAT] "${text}" at (${Math.round(x)},${Math.round(y)})`);
+    } catch (e) {
+      console.error('[FLOAT] Failed to create text:', e);
+    }
+  }
+
   private updateDamageTexts(dt: number) {
     const dtSec = dt / 1000;
     for (const t of this.damageTexts) {
       t.y += t.vy * dtSec;
-      t.alpha -= 1.5 * dtSec;
+      t.alpha -= 1.2 * dtSec;
+      if (t.obj) {
+        t.obj.setPosition(t.x, t.y);
+        t.obj.setAlpha(Math.max(0, t.alpha));
+      }
     }
-    this.damageTexts = this.damageTexts.filter((t) => t.alpha > 0);
+    // Clean up expired
+    this.damageTexts = this.damageTexts.filter((t) => {
+      if (t.alpha <= 0) {
+        t.obj?.destroy();
+        return false;
+      }
+      return true;
+    });
   }
 
   private updateLeakEffects(dt: number) {
@@ -750,6 +794,7 @@ export class GameScene extends Phaser.Scene {
           let sellPrice = Math.floor(def.cost * 0.7);
           if (tower.appliedElements.length >= 1) sellPrice += Math.floor(3 * 0.7);
           if (tower.appliedElements.length >= 2) sellPrice += Math.floor(5 * 0.7);
+          if (tower.appliedElements.length >= 3) sellPrice += Math.floor(8 * 0.7);
           
           let info = `${towerStats.displayName}\n`;
           info += `Elements: ${elems}\n`;
@@ -770,8 +815,8 @@ export class GameScene extends Phaser.Scene {
           
           if (this.gameState.phase === 'shopping') {
             info += `\n💰 Click to sell for ${sellPrice}g`;
-            if (tower.appliedElements.length < 2) {
-              const cost = tower.appliedElements.length === 0 ? 3 : 5;
+            if (tower.appliedElements.length < 3) {
+              const cost = getUpgradeCost(tower.appliedElements.length);
               info += `\n⚡ Right-click to upgrade (${cost}g)`;
             }
           }
@@ -1132,13 +1177,24 @@ export class GameScene extends Phaser.Scene {
         this.towerGfx.lineStyle(2, elemColor, 0.6);
         this.towerGfx.strokeCircle(cx, cy, size + 4);
         
-        // Second element dot
+        // Second element dot (top-right)
         if (tower.appliedElements.length >= 2) {
           const secondColor = Phaser.Display.Color.HexStringToColor(
             ELEMENT_COLORS[tower.appliedElements[1]]
           ).color;
           this.towerGfx.fillStyle(secondColor, 0.9);
           this.towerGfx.fillCircle(cx + size * 0.8, cy - size * 0.8, 6);
+        }
+        // Third element dot (top-left)
+        if (tower.appliedElements.length >= 3) {
+          const thirdColor = Phaser.Display.Color.HexStringToColor(
+            ELEMENT_COLORS[tower.appliedElements[2]]
+          ).color;
+          this.towerGfx.fillStyle(thirdColor, 0.9);
+          this.towerGfx.fillCircle(cx - size * 0.8, cy - size * 0.8, 6);
+          // T3 glow ring
+          this.towerGfx.lineStyle(1, 0xffd93d, 0.4);
+          this.towerGfx.strokeCircle(cx, cy, size + 7);
         }
       }
     }
@@ -1265,6 +1321,24 @@ export class GameScene extends Phaser.Scene {
     }).setDepth(5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => socket.send({ type: 'DEV_START_COMBAT' }));
 
+    // Speed buttons — top right above grid
+    const speeds = [1, 2, 3, 5, 10];
+    this.speedButtons = [];
+    const speedY = GRID_Y - 28;
+    const speedStartX = GRID_X + GRID_PX - speeds.length * 34;
+    speeds.forEach((s, i) => {
+      const btn = this.add.text(speedStartX + i * 34, speedY, `×${s}`, {
+        fontSize: '12px',
+        color: s === 1 ? '#1a1a2e' : '#ccc',
+        backgroundColor: s === 1 ? '#FFD93D' : '#2a2a3e',
+        padding: { x: 5, y: 4 },
+      }).setDepth(5).setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => {
+          socket.send({ type: 'SET_SPEED', speed: s });
+        });
+      this.speedButtons.push(btn);
+    });
+
     // Fragment inventory bar — right side of grid
     const rightX = GRID_X + GRID_PX + 10;
     this.uiFragmentBar = this.add.text(rightX, GRID_Y, '', {
@@ -1305,7 +1379,7 @@ export class GameScene extends Phaser.Scene {
     const me = this.me();
     if (!me) return;
 
-    this.uiTopLeft.setText(`❤️ ${me.hp}   💰 ${me.gold}   Lv.${me.level} (${me.xp}/${me.xpToNext})`);
+    this.uiTopLeft.setText(`❤️ ${me.hp}   💰 ${me.gold}`);
     this.updatePhaseText();
 
     // Shop
@@ -1392,7 +1466,7 @@ export class GameScene extends Phaser.Scene {
       if (i < this.uiOpponents.length) {
         const status = opp.alive ? `❤️ ${opp.hp}` : '💀';
         this.uiOpponents[i]
-          .setText(`${opp.name}\n${status}  Lv.${opp.level}`)
+          .setText(`${opp.name}\n${status}`)
           .setColor(PLAYER_COLOR_HEX[opp.color]);
       }
     });

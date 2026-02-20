@@ -54,6 +54,8 @@ export class Game {
   tickCount = 0;
   /** Track per-round leaks per player for clean bonus calculation */
   roundLeaks: Map<string, number> = new Map();
+  /** Game speed multiplier */
+  speed: number = 1;
 
   config: GameConfig;
 
@@ -201,9 +203,17 @@ export class Game {
         break;
       }
       case 'DEV_START_COMBAT': {
-        if (this.state.phase === 'gameOver' || this.state.phase === 'lobby') return;
-        if (this.phaseTimer) clearInterval(this.phaseTimer);
+        if (this.state.phase !== 'shopping') return;
+        if (this.phaseTimer) { clearInterval(this.phaseTimer); this.phaseTimer = null; }
+        this.state.timer = 0;
         this.startCombat();
+        break;
+      }
+      case 'SET_SPEED': {
+        const s = msg.speed;
+        if (![1, 2, 3, 5, 10].includes(s)) return;
+        this.speed = s;
+        this.broadcast({ type: 'SPEED_CHANGE', speed: s });
         break;
       }
       case 'CAST_HEX': {
@@ -302,14 +312,6 @@ export class Game {
     }
     this.state.mobs[target.id].push(newMob);
 
-    // Notify that mob was leaked and where it went
-    this.broadcast({
-      type: 'MOB_LEAKED',
-      playerId: fromPlayerId,
-      mobId: leakedMob.instanceId,
-      damage: Math.ceil(leakedMob.hp / leakedMob.maxHp * 3) + 1,
-      sentTo: target.id,
-    });
   }
 
   sendTo(playerId: string, msg: ServerMsg) {
@@ -345,11 +347,16 @@ export class Game {
     });
     this.broadcastStateUpdate();
 
-    // Countdown timer
+    // Clear any leftover timer
+    if (this.phaseTimer) { clearInterval(this.phaseTimer); this.phaseTimer = null; }
+
+    // Countdown timer (speed affects shopping timer too)
     this.phaseTimer = setInterval(() => {
-      this.state.timer--;
+      this.state.timer -= this.speed;
       if (this.state.timer <= 0) {
+        this.state.timer = 0;
         clearInterval(this.phaseTimer!);
+        this.phaseTimer = null;
         this.startCombat();
       }
     }, 1000);
@@ -381,9 +388,17 @@ export class Game {
       this.roundLeaks.set(p.id, 0);
     });
 
+    // Clear any leftover tick loop
+    if (this.tickInterval) { clearInterval(this.tickInterval); this.tickInterval = null; }
+
     // Start tick loop
     this.tickCount = 0;
-    this.tickInterval = setInterval(() => this.tick(), TICK_MS);
+    this.tickInterval = setInterval(() => {
+      for (let i = 0; i < this.speed; i++) {
+        if (this.state.phase !== 'combat') break;
+        this.tick();
+      }
+    }, TICK_MS);
   }
 
   tick() {
@@ -400,7 +415,7 @@ export class Game {
         p.gold += goldReward;
       });
 
-      // Handle leaks - send mobs to opponents
+      // Handle leaks - damage player and send mobs to opponents
       result.leaked.forEach((mob) => {
         const damage = mob.hp > 0 ? Math.ceil(mob.hp / mob.maxHp * 3) + 1 : 1;
         p.hp = Math.max(0, p.hp - damage);
@@ -408,7 +423,16 @@ export class Game {
         // Track leaks for clean bonus
         this.roundLeaks.set(p.id, (this.roundLeaks.get(p.id) || 0) + 1);
         
-        // Send leaked mob to a random opponent
+        // Notify leak with damage
+        this.broadcast({
+          type: 'MOB_LEAKED',
+          playerId: p.id,
+          mobId: mob.instanceId,
+          damage,
+          sentTo: '',
+        });
+        
+        // Send leaked mob to a random opponent (multiplayer only)
         this.sendLeakedMobToOpponent(p.id, mob);
       });
 
@@ -426,7 +450,12 @@ export class Game {
             element: a.element,
             splash: a.splash,
           })),
-          kills: result.killed.map((m) => m.instanceId),
+          kills: result.killed.map((m) => ({
+            mobId: m.instanceId,
+            x: m.x,
+            y: m.y,
+            gold: this.economy.mobKillReward(this.state.round),
+          })),
           leaks: result.leaked.map((m) => m.instanceId),
         });
       }
@@ -438,6 +467,11 @@ export class Game {
     // Sync mob positions periodically
     if (this.tickCount % MOB_SYNC_INTERVAL === 0) {
       this.broadcast({ type: 'MOB_SYNC', mobs: this.state.mobs });
+    }
+
+    // Sync gold/HP periodically during combat (every 10 ticks = 500ms)
+    if (this.tickCount % 10 === 0) {
+      this.broadcastStateUpdate();
     }
 
     // Check eliminations
