@@ -598,7 +598,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateGridHover(ptr: Phaser.Input.Pointer) {
-    if (this.gameState.phase !== 'shopping') {
+    if (this.gameState.phase === 'gameOver' || this.gameState.phase === 'lobby') {
       this.gridHover = null;
       return;
     }
@@ -1160,13 +1160,16 @@ export class GameScene extends Phaser.Scene {
     }).setDepth(5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => socket.send({ type: 'DEV_START_COMBAT' }));
 
-    // Fragment inventory bar
-    this.uiFragmentBar = this.add.text(GRID_X, shopY + 45, '', {
+    // Fragment inventory bar — right side of grid
+    const rightX = GRID_X + GRID_PX + 10;
+    this.uiFragmentBar = this.add.text(rightX, GRID_Y, '', {
       fontSize: '13px', color: '#ccc',
       backgroundColor: '#1a1a2e',
-      padding: { x: 8, y: 4 },
+      padding: { x: 8, y: 6 },
       stroke: '#333',
       strokeThickness: 1,
+      wordWrap: { width: 170 },
+      lineSpacing: 4,
     }).setDepth(5);
 
     // Synergy
@@ -1313,22 +1316,23 @@ export class GameScene extends Phaser.Scene {
     const me = this.me();
     if (!me) return;
 
-    // Create fragment display: "🔥×2  💧×1  🌍×0  💨×3  ☀️×0  🌑×1"
-    const fragmentParts: string[] = [];
+    const lines: string[] = ['⚗️ FRAGMENTS'];
     for (const elem of ELEMENTS) {
       const symbol = ELEMENT_SYMBOLS[elem];
       const count = me.fragments[elem] || 0;
-      const color = count > 0 ? ELEMENT_COLORS[elem] : '#666666';
-      fragmentParts.push(`${symbol}×${count}`);
+      const bought = me.totalBought[elem] || 0;
+      const bar = count > 0 ? '█'.repeat(count) : '—';
+      const bonus = bought >= 3 ? ' +30%' : bought >= 2 ? ' +15%' : '';
+      lines.push(`${symbol} ×${count} ${bar}${bonus}`);
     }
     
-    this.uiFragmentBar.setText(`Fragment Bank: ${fragmentParts.join('  ')}`);
+    this.uiFragmentBar.setText(lines.join('\n'));
   }
 
   // ── Actions ───────────────────────────────────────────
 
   private selectShopSlot(shopIndex: number) {
-    if (this.gameState.phase !== 'shopping') return;
+    if (this.gameState.phase === 'gameOver' || this.gameState.phase === 'lobby') return;
     const me = this.me();
     if (!me || !me.shop[shopIndex]) return;
     
@@ -1359,7 +1363,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onGridClick(pos: GridPos) {
-    if (this.gameState.phase !== 'shopping') return;
+    if (this.gameState.phase === 'gameOver' || this.gameState.phase === 'lobby') return;
     const me = this.me();
     if (!me) return;
 

@@ -17,8 +17,8 @@ export const TOTAL_ROUNDS = 30;
 export const TICK_RATE = 20;                    // ticks per second
 export const TICK_MS = 1000 / TICK_RATE;        // 50ms
 export const MOB_SYNC_INTERVAL = 3;             // every 3 ticks = 150ms
-export const SHOP_PHASE_DURATION = 20;          // seconds
-export const FIRST_SHOP_PHASE_DURATION = 30;    // more time on round 1
+export const SHOP_PHASE_DURATION = 60;          // seconds between waves
+export const FIRST_SHOP_PHASE_DURATION = 60;    // same for round 1
 
 // ── Economy ─────────────────────────────────────────────
 
