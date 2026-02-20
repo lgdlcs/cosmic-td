@@ -15,6 +15,11 @@ export class LobbyScene extends Phaser.Scene {
     super({ key: 'LobbyScene' });
   }
 
+  init(data?: { forceReconnect?: boolean }) {
+    // Store if we need to force reconnection
+    this.data.set('forceReconnect', data?.forceReconnect || false);
+  }
+
   create() {
     const cx = this.cameras.main.centerX;
 
@@ -70,10 +75,15 @@ export class LobbyScene extends Phaser.Scene {
     // Always fresh connection when entering lobby
     socket.clearHandlers();
     const handler = (msg: ServerMsg) => this.handleMsg(msg);
+    
+    // Force reconnection to ensure clean state server-side
+    this.statusText.setText('🔄 Connecting...').setColor('#4EA8DE');
     socket.reconnect().then(() => {
+      console.log('[lobby] Connected to server');
       socket.onMessage(handler);
+      this.statusText.setText('✅ Connected - Enter name and join').setColor('#4AD97A');
     }).catch((e) => {
-      console.error('Failed to connect', e);
+      console.error('[lobby] Failed to connect', e);
       this.statusText.setText('❌ Cannot connect to server').setColor('#ff6b6b');
     });
   }

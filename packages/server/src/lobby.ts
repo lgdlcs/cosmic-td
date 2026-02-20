@@ -18,6 +18,37 @@ function generateCode(): string {
   return nanoid(6).toUpperCase();
 }
 
+function cleanupPlayerFromRooms(client: Client) {
+  // Remove from any existing room
+  if (client.roomCode) {
+    const oldRoom = rooms.get(client.roomCode);
+    if (oldRoom) {
+      oldRoom.clients = oldRoom.clients.filter((c) => c.id !== client.id);
+      oldRoom.names.delete(client.id);
+      oldRoom.ready.delete(client.id);
+      if (oldRoom.clients.length === 0) {
+        rooms.delete(client.roomCode);
+        console.log(`[cleanup] Removed empty room ${client.roomCode}`);
+      }
+    }
+    client.roomCode = null;
+  }
+
+  // Also check all rooms in case of stale references
+  for (const [code, room] of rooms.entries()) {
+    const oldLength = room.clients.length;
+    room.clients = room.clients.filter((c) => c.id !== client.id);
+    if (room.clients.length < oldLength) {
+      room.names.delete(client.id);
+      room.ready.delete(client.id);
+      if (room.clients.length === 0) {
+        rooms.delete(code);
+        console.log(`[cleanup] Removed stale room ${code}`);
+      }
+    }
+  }
+}
+
 function send(client: Client, msg: ServerMsg) {
   if (client.ws.readyState === client.ws.OPEN) {
     client.ws.send(JSON.stringify(msg));
@@ -37,16 +68,13 @@ function broadcastLobby(room: Room) {
 export function handleMessage(client: Client, msg: ClientMsg) {
   switch (msg.type) {
     case 'JOIN_LOBBY': {
-      // Clean up any previous room
-      if (client.roomCode) {
-        const oldRoom = rooms.get(client.roomCode);
-        if (oldRoom) {
-          oldRoom.clients = oldRoom.clients.filter((c) => c.id !== client.id);
-          oldRoom.names.delete(client.id);
-          oldRoom.ready.delete(client.id);
-          if (oldRoom.clients.length === 0) rooms.delete(client.roomCode);
-        }
-        client.roomCode = null;
+      // Clean up any previous room and any finished games
+      cleanupPlayerFromRooms(client);
+      
+      // Also check if player has a finished game and clean it up
+      const existingGame = getGameForPlayer(client.id);
+      if (existingGame && existingGame.state.phase === 'gameOver') {
+        console.log(`[cleanup] Player ${client.id} rejoining after game over`);
       }
 
       let room: Room;

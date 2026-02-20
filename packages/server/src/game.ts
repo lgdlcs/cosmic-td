@@ -626,6 +626,15 @@ export class Game {
     this.clients.forEach((_, playerId) => {
       playerToGame.delete(playerId);
     });
+
+    // Remove from active games after delay to allow clients to process GAME_OVER
+    const roomCode = [...this.clients.values()][0]?.roomCode;
+    if (roomCode) {
+      setTimeout(() => {
+        activeGames.delete(roomCode);
+        console.log(`[cleanup] Removed game ${roomCode}`);
+      }, 1000);
+    }
   }
 }
 
