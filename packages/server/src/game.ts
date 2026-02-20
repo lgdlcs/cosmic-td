@@ -30,6 +30,8 @@ import {
   TOWER_MAP,
   isPathCell,
   HEX_MAP,
+  getComboTower,
+  T1_TOWERS,
 } from '@ect/shared';
 import { ShopManager } from './shop.js';
 import { CombatManager } from './combat.js';
@@ -46,6 +48,8 @@ export class Game {
   tickInterval: ReturnType<typeof setInterval> | null = null;
   phaseTimer: ReturnType<typeof setInterval> | null = null;
   tickCount = 0;
+  /** Track per-round leaks per player for clean bonus calculation */
+  roundLeaks: Map<string, number> = new Map();
 
   constructor(clients: Client[], names: Map<string, string>) {
     // Pick random map
@@ -161,6 +165,9 @@ export class Game {
           player.towers.push(tower);
         }
 
+        // Check for T2 fusion (two different T1 elements → T2 combo tower)
+        this.checkT2Fusion(player);
+
         this.updateSynergies(player);
         this.broadcastStateUpdate();
         break;
@@ -217,6 +224,52 @@ export class Game {
         break;
       }
     }
+  }
+
+  /** Check if placing a tower completes a T2 fusion (two different T1 elements → T2 combo) */
+  private checkT2Fusion(player: PlayerState): boolean {
+    // Get all placed T1 towers (only non-starred base T1 towers)
+    const t1Placed = player.towers.filter(t => {
+      const def = TOWER_MAP[t.defId];
+      return def && def.tier === 1 && t.starLevel === 0;
+    });
+
+    // Check all pairs of placed T1 towers for combo matches
+    for (let i = 0; i < t1Placed.length; i++) {
+      for (let j = i + 1; j < t1Placed.length; j++) {
+        const a = t1Placed[i];
+        const b = t1Placed[j];
+        const elemA = a.elements[0];
+        const elemB = b.elements[0];
+        if (elemA === elemB) continue;
+
+        const combo = getComboTower(elemA, elemB);
+        if (!combo) continue;
+
+        // Fuse! Remove both T1 towers, create T2 at first tower's position
+        player.towers = player.towers.filter(t => t.instanceId !== a.instanceId && t.instanceId !== b.instanceId);
+        const fused: TowerInstance = {
+          instanceId: nanoid(8),
+          defId: combo.id,
+          position: a.position,
+          starLevel: 0,
+          elements: [...combo.elements],
+        };
+        player.towers.push(fused);
+
+        // Broadcast fusion event
+        this.broadcast({
+          type: 'COMBAT_EVENTS',
+          playerId: player.id,
+          attacks: [],
+          kills: [],
+          leaks: [],
+        });
+
+        return true; // Only one fusion per placement
+      }
+    }
+    return false;
   }
 
   private updateSynergies(player: PlayerState) {
@@ -389,6 +442,12 @@ export class Game {
 
     this.broadcastStateUpdate();
 
+    // Reset per-round leak tracking
+    this.roundLeaks.clear();
+    this.state.players.filter((p) => p.alive).forEach((p) => {
+      this.roundLeaks.set(p.id, 0);
+    });
+
     // Start tick loop
     this.tickCount = 0;
     this.tickInterval = setInterval(() => this.tick(), TICK_MS);
@@ -411,6 +470,9 @@ export class Game {
       result.leaked.forEach((mob) => {
         const damage = mob.hp > 0 ? Math.ceil(mob.hp / mob.maxHp * 3) + 1 : 1;
         p.hp = Math.max(0, p.hp - damage);
+        
+        // Track leaks for clean bonus
+        this.roundLeaks.set(p.id, (this.roundLeaks.get(p.id) || 0) + 1);
         
         // Send leaked mob to a random opponent
         this.sendLeakedMobToOpponent(p.id, mob);
@@ -481,8 +543,8 @@ export class Game {
   endRound() {
     // Calculate income
     this.state.players.filter((p) => p.alive).forEach((p) => {
-      const leaked = false; // TODO: track per-round leaks
-      this.economy.endOfRoundIncome(p, !leaked);
+      const leakCount = this.roundLeaks.get(p.id) || 0;
+      this.economy.endOfRoundIncome(p, leakCount === 0);
     });
 
     this.broadcastStateUpdate();
