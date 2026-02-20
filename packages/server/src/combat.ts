@@ -19,16 +19,28 @@ import {
   TOWER_MAP,
 } from '@ect/shared';
 
-interface TickResult {
+export interface AttackEvent {
+  towerId: string;
+  towerX: number;
+  towerY: number;
+  targetId: string;
+  targetX: number;
+  targetY: number;
+  damage: number;
+  element: string;
+  splash: boolean;
+}
+
+export interface TickResult {
   killed: MobInstance[];
   leaked: MobInstance[];
   remaining: MobInstance[];
+  attacks: AttackEvent[];
 }
 
 export class CombatManager {
   state: GameState;
   map: GameMap;
-  // Track tower cooldowns: instanceId → ms until next attack
   cooldowns: Map<string, number> = new Map();
 
   constructor(state: GameState, map: GameMap) {
@@ -52,24 +64,21 @@ export class CombatManager {
 
     for (let i = 0; i < count + extraMobs; i++) {
       const entry = this.map.entry;
-      // Stagger spawn: each mob starts slightly behind the entry
-      const staggerOffset = i * 0.6; // 0.6 cells apart
+      const staggerOffset = i * 0.6;
       mobs.push({
         instanceId: nanoid(8),
         defId: isBoss ? 'boss' : 'grunt',
         hp,
         maxHp: hp,
         x: entry.col,
-        y: entry.row - staggerOffset, // queue them above entry
+        y: entry.row - staggerOffset,
         pathIndex: 0,
         effects: hasHaste ? [{ type: 'slow', remaining: 99999, value: -0.3 }] : [],
         visible: true,
       });
     }
 
-    // Clear hex after applying
     player.incomingHex = null;
-
     return mobs;
   }
 
@@ -78,6 +87,7 @@ export class CombatManager {
     const killed: MobInstance[] = [];
     const leaked: MobInstance[] = [];
     const remaining: MobInstance[] = [];
+    const attacks: AttackEvent[] = [];
     const dt = dtMs / 1000;
 
     // Move mobs
@@ -88,19 +98,17 @@ export class CombatManager {
       }
 
       // Calculate effective speed
-      let speed = 1.5; // base cells/second
+      let speed = 1.5;
       for (const effect of mob.effects) {
         if (effect.type === 'slow') {
           speed *= (1 - effect.value);
         }
-        // negative value = speed BOOST (haste hex)
       }
-      speed = Math.max(speed, 0.3); // minimum speed
+      speed = Math.max(speed, 0.3);
 
       // Advance along path
       const nextIdx = mob.pathIndex + 1;
       if (nextIdx >= this.map.path.length) {
-        // Mob reached exit
         leaked.push(mob);
         continue;
       }
@@ -111,12 +119,10 @@ export class CombatManager {
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (dist < speed * dt) {
-        // Reached waypoint
         mob.x = target.col;
         mob.y = target.row;
         mob.pathIndex = nextIdx;
       } else {
-        // Move towards waypoint
         mob.x += (dx / dist) * speed * dt;
         mob.y += (dy / dist) * speed * dt;
       }
@@ -172,14 +178,50 @@ export class CombatManager {
 
       target.hp -= finalDamage;
 
+      // Splash damage
+      const hasSplash = def.splashRadius && def.splashRadius > 0;
+      if (hasSplash) {
+        const splashTargets = remaining.filter((m) => {
+          if (m === target) return false;
+          const dx = m.x - target.x;
+          const dy = m.y - target.y;
+          return Math.sqrt(dx * dx + dy * dy) <= def.splashRadius!;
+        });
+        for (const st of splashTargets) {
+          st.hp -= finalDamage * 0.5; // 50% splash
+        }
+      }
+
       // Apply tower special effects
       this.applyTowerEffect(tower, target);
 
       // Set cooldown
       this.cooldowns.set(tower.instanceId, 1000 / def.attackSpeed);
+
+      // Record attack event
+      attacks.push({
+        towerId: tower.instanceId,
+        towerX: tower.position.col,
+        towerY: tower.position.row,
+        targetId: target.instanceId,
+        targetX: target.x,
+        targetY: target.y,
+        damage: finalDamage,
+        element: tower.elements[0] || 'fire',
+        splash: !!hasSplash,
+      });
+
+      // Check if target died from this hit
+      if (target.hp <= 0) {
+        const idx = remaining.indexOf(target);
+        if (idx >= 0) {
+          remaining.splice(idx, 1);
+          killed.push(target);
+        }
+      }
     }
 
-    return { killed, leaked, remaining };
+    return { killed, leaked, remaining, attacks };
   }
 
   private getSynergyBonus(player: PlayerState, tower: TowerInstance): number {
@@ -210,6 +252,11 @@ export class CombatManager {
     // Dark towers poison
     if (tower.elements.includes('dark')) {
       mob.effects.push({ type: 'poison', remaining: 3000, value: 4 });
+    }
+
+    // Fire towers burn (for non-splash basic fire)
+    if (tower.elements.includes('fire') && !tower.elements.includes('water')) {
+      mob.effects.push({ type: 'burn', remaining: 2000, value: 3 });
     }
   }
 }

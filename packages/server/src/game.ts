@@ -311,7 +311,6 @@ export class Game {
 
   tick() {
     this.tickCount++;
-    const events: ServerMsg[] = [];
 
     // Update each alive player's mobs
     this.state.players.filter((p) => p.alive).forEach((p) => {
@@ -321,35 +320,36 @@ export class Game {
       result.killed.forEach((mob) => {
         const goldReward = this.economy.mobKillReward(this.state.round);
         p.gold += goldReward;
-        events.push({ type: 'MOB_KILLED', playerId: p.id, mobId: mob.instanceId, goldReward });
       });
 
       // Handle leaks
       result.leaked.forEach((mob) => {
         const damage = mob.hp > 0 ? Math.ceil(mob.hp / mob.maxHp * 3) + 1 : 1;
         p.hp = Math.max(0, p.hp - damage);
-        
-        // Send leaked mob to random other alive player
-        const others = this.state.players.filter((o) => o.alive && o.id !== p.id);
-        const target = others.length > 0 ? others[Math.floor(Math.random() * others.length)] : null;
-        
-        events.push({
-          type: 'MOB_LEAKED',
-          playerId: p.id,
-          mobId: mob.instanceId,
-          damage,
-          sentTo: target?.id || '',
-        });
-
-        // TODO: actually add leaked mob to target's board
       });
+
+      // Broadcast combat events (attacks, kills, leaks) in one message
+      if (result.attacks.length > 0 || result.killed.length > 0 || result.leaked.length > 0) {
+        this.broadcast({
+          type: 'COMBAT_EVENTS',
+          playerId: p.id,
+          attacks: result.attacks.map((a) => ({
+            towerX: a.towerX,
+            towerY: a.towerY,
+            targetX: a.targetX,
+            targetY: a.targetY,
+            damage: a.damage,
+            element: a.element,
+            splash: a.splash,
+          })),
+          kills: result.killed.map((m) => m.instanceId),
+          leaks: result.leaked.map((m) => m.instanceId),
+        });
+      }
 
       // Update mob list (remove dead/leaked)
       this.state.mobs[p.id] = result.remaining;
     });
-
-    // Broadcast events
-    events.forEach((e) => this.broadcast(e));
 
     // Sync mob positions periodically
     if (this.tickCount % MOB_SYNC_INTERVAL === 0) {

@@ -164,6 +164,7 @@ export type ServerMsg =
   | { type: 'SHOP_UPDATE'; shop: (string | null)[]; gold: number }
   | { type: 'MOB_SYNC'; mobs: Record<string, MobInstance[]> }
   | { type: 'TOWER_ATTACK'; playerId: string; towerId: string; targetId: string; damage: number }
+  | { type: 'COMBAT_EVENTS'; playerId: string; attacks: CombatAttack[]; kills: string[]; leaks: string[] }
   | { type: 'MOB_KILLED'; playerId: string; mobId: string; goldReward: number }
   | { type: 'MOB_LEAKED'; playerId: string; mobId: string; damage: number; sentTo: string }
   | { type: 'HEX_INCOMING'; hex: HexCast }
@@ -171,6 +172,16 @@ export type ServerMsg =
   | { type: 'PLAYER_ELIMINATED'; playerId: string }
   | { type: 'GAME_OVER'; winnerId: string }
   | { type: 'ERROR'; message: string };
+
+export interface CombatAttack {
+  towerX: number;
+  towerY: number;
+  targetX: number;
+  targetY: number;
+  damage: number;
+  element: string;
+  splash: boolean;
+}
 
 export interface LobbyPlayer {
   id: string;
