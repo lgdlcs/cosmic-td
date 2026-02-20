@@ -170,6 +170,7 @@ export class GameScene extends Phaser.Scene {
   private uiTopLeft!: Phaser.GameObjects.Text;
   private uiTopRight!: Phaser.GameObjects.Text;
   private uiShopSlots: Phaser.GameObjects.Text[] = [];
+  private uiFragmentBar!: Phaser.GameObjects.Text;
   private uiSynergy!: Phaser.GameObjects.Text;
   private uiOpponents: Phaser.GameObjects.Text[] = [];
   private uiHex!: Phaser.GameObjects.Text;
@@ -1159,6 +1160,15 @@ export class GameScene extends Phaser.Scene {
     }).setDepth(5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => socket.send({ type: 'DEV_START_COMBAT' }));
 
+    // Fragment inventory bar
+    this.uiFragmentBar = this.add.text(GRID_X, shopY + 45, '', {
+      fontSize: '13px', color: '#ccc',
+      backgroundColor: '#1a1a2e',
+      padding: { x: 8, y: 4 },
+      stroke: '#333',
+      strokeThickness: 1,
+    }).setDepth(5);
+
     // Synergy
     this.uiSynergy = this.add.text(GRID_X, shopY + 62, '', {
       fontSize: '12px', color: '#aaa',
@@ -1263,7 +1273,10 @@ export class GameScene extends Phaser.Scene {
       }
     }
     
-    this.uiSynergy.setText(`Fragments: ${parts.join('  ')}  ${statusText}`);
+    // Update fragment inventory bar
+    this.updateFragmentBar();
+    
+    this.uiSynergy.setText(`Elements: ${parts.join('  ')}  ${statusText}`);
 
     // Opponents
     const opponents = this.gameState.players.filter((p) => p.id !== this.myId);
@@ -1294,6 +1307,22 @@ export class GameScene extends Phaser.Scene {
     const timer = this.localTimer > 0 ? `⏱ ${this.localTimer}s` : '';
     const streakText = streak > 0 ? `  🔥×${streak}` : '';
     this.uiTopRight.setText(`📍 Round ${this.gameState.round}/30  ${phase}  ${timer}${streakText}`);
+  }
+
+  private updateFragmentBar() {
+    const me = this.me();
+    if (!me) return;
+
+    // Create fragment display: "🔥×2  💧×1  🌍×0  💨×3  ☀️×0  🌑×1"
+    const fragmentParts: string[] = [];
+    for (const elem of ELEMENTS) {
+      const symbol = ELEMENT_SYMBOLS[elem];
+      const count = me.fragments[elem] || 0;
+      const color = count > 0 ? ELEMENT_COLORS[elem] : '#666666';
+      fragmentParts.push(`${symbol}×${count}`);
+    }
+    
+    this.uiFragmentBar.setText(`Fragment Bank: ${fragmentParts.join('  ')}`);
   }
 
   // ── Actions ───────────────────────────────────────────
