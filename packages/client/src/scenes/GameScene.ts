@@ -1115,12 +1115,27 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Synergies
+    // Synergies with bonuses
     const parts: string[] = [];
     for (const [elem, count] of Object.entries(me.synergies)) {
       if (count > 0) {
         const sym = ELEMENT_SYMBOLS[elem as keyof typeof ELEMENT_SYMBOLS] || elem;
-        parts.push(`${sym}×${count}`);
+        let bonus = '';
+        let highlight = false;
+        
+        if (count >= 4) {
+          bonus = ' +30%DMG+PROC';
+          highlight = true;
+        } else if (count >= 3) {
+          bonus = ' +20%DMG';
+          highlight = true;
+        } else if (count >= 2) {
+          bonus = ' +10%AS';
+          highlight = true;
+        }
+        
+        const text = `${sym}×${count}${bonus}`;
+        parts.push(highlight ? `[${text}]` : text);
       }
     }
     const selectionStatus = this.selectedShopIndex >= 0 ? '— Click grid to place tower' : '';

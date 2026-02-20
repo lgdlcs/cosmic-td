@@ -277,8 +277,10 @@ export class CombatManager {
       // Apply synergy special effects at 3+ of same element
       this.applySynergyEffect(player, tower, target, remaining);
 
-      // Set cooldown
-      this.cooldowns.set(tower.instanceId, 1000 / def.attackSpeed);
+      // Set cooldown with synergy attack speed bonus
+      const attackSpeedBonus = this.getAttackSpeedBonus(player, tower);
+      const effectiveAttackSpeed = def.attackSpeed * (1 + attackSpeedBonus);
+      this.cooldowns.set(tower.instanceId, 1000 / effectiveAttackSpeed);
 
       // Record attack event
       attacks.push({
@@ -319,57 +321,80 @@ export class CombatManager {
     return bonus;
   }
 
+  /** Calculate attack speed bonus from 2-piece synergies */
+  private getAttackSpeedBonus(player: PlayerState, tower: TowerInstance): number {
+    let bonus = 0;
+    for (const element of tower.elements) {
+      const count = player.synergies[element] || 0;
+      if (count >= 2) {
+        bonus = Math.max(bonus, 0.10); // +10% attack speed for 2+ of same element
+      }
+    }
+    return bonus;
+  }
+
   /** Apply special synergy effects when player has 3+ towers of the same element */
   private applySynergyEffect(player: PlayerState, tower: TowerInstance, target: MobInstance, allMobs: MobInstance[]) {
     for (const element of tower.elements) {
       const count = player.synergies[element] || 0;
-      if (count < 3) continue;
+      if (count < 4) continue; // Only 4-piece procs
 
       switch (element) {
         case 'fire':
-          // Fire 3+: attacks cause AoE burn around target
-          for (const m of allMobs) {
-            if (m === target) continue;
-            const dx = m.x - target.x;
-            const dy = m.y - target.y;
-            if (Math.sqrt(dx * dx + dy * dy) <= 1.5) {
-              m.effects.push({ type: 'burn', remaining: 2000, value: 5 });
+          // Fire 4: 20% chance double AoE
+          if (Math.random() < 0.20) {
+            for (const m of allMobs) {
+              if (m === target) continue;
+              const dx = m.x - target.x;
+              const dy = m.y - target.y;
+              if (Math.sqrt(dx * dx + dy * dy) <= 2.0) { // Double radius
+                const def = TOWER_MAP[tower.defId];
+                if (def) {
+                  const synergyBonus = this.getSynergyBonus(player, tower);
+                  const starMult = STAR_DAMAGE_MULT[tower.starLevel] || 1;
+                  const splashDamage = def.damage * starMult * (1 + synergyBonus);
+                  m.hp -= splashDamage;
+                }
+              }
             }
           }
           break;
         case 'water':
-          // Water 3+: stronger slow (40% instead of 25%)
-          target.effects = target.effects.filter(e => e.type !== 'slow' || e.value < 0);
-          target.effects.push({ type: 'slow', remaining: 3000, value: 0.40 });
-          break;
-        case 'earth':
-          // Earth 3+: chance to stun (freeze) for 0.5s
-          if (Math.random() < 0.15) {
-            target.effects.push({ type: 'freeze', remaining: 500, value: 1.0 });
+          // Water 4: slow becomes freeze (1s stun)
+          const slowEffect = target.effects.find(e => e.type === 'slow');
+          if (slowEffect) {
+            // Replace slow with freeze
+            target.effects = target.effects.filter(e => e.type !== 'slow');
+            target.effects.push({ type: 'freeze', remaining: 1000, value: 1.0 });
           }
           break;
+        case 'earth':
+          // Earth 4: towers gain +50% HP (resistance to siege golem)
+          // This is handled separately for each tower - for now, strong knockback
+          target.pathIndex = Math.max(0, target.pathIndex - 2);
+          break;
         case 'wind':
-          // Wind 3+: attacks chain to 1 nearby mob for 30% damage
-          {
+          // Wind 4: 15% chance double strike
+          if (Math.random() < 0.15) {
             const def = TOWER_MAP[tower.defId];
-            if (!def) break;
-            const nearby = allMobs
-              .filter(m => m !== target && Math.sqrt((m.x - target.x) ** 2 + (m.y - target.y) ** 2) <= 1.5)
-              .slice(0, 1);
-            for (const m of nearby) {
-              m.hp -= def.damage * 0.3;
+            if (def) {
+              const synergyBonus = this.getSynergyBonus(player, tower);
+              const starMult = STAR_DAMAGE_MULT[tower.starLevel] || 1;
+              const doubleDamage = def.damage * starMult * (1 + synergyBonus);
+              target.hp -= doubleDamage;
             }
           }
           break;
-        case 'dark':
-          // Dark 3+: stronger poison stacking
-          target.effects.push({ type: 'poison', remaining: 4000, value: 6 });
-          break;
         case 'light':
-          // Light 3+: reveals all mobs in range and boosts all tower damage (handled via synergy bonus already)
+          // Light 4: +1 range (handled in tower stats) + reveal all
           for (const m of allMobs) {
             m.visible = true;
           }
+          break;
+        case 'dark':
+          // Dark 4: mobs take 3% max HP/s as shadow damage
+          const shadowDamage = target.maxHp * 0.03;
+          target.hp -= shadowDamage;
           break;
       }
     }
