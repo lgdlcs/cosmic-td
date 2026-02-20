@@ -1,271 +1,211 @@
 import type { TowerDef, HexDef, Element } from './types.js';
+import { ELEMENT_DAMAGE_BONUS } from './constants.js';
 
-// ── T1 Towers (Base Elements) ───────────────────────────
+// ── Base Towers (no elements) ─────────────────────────────
 
-export const T1_TOWERS: TowerDef[] = [
+export const BASE_TOWERS: TowerDef[] = [
   {
-    id: 'fire_t1',
-    name: 'Flame Spitter',
-    elements: ['fire'],
-    tier: 1,
-    cost: 3,
-    damage: 8,
-    attackSpeed: 0.8,
-    range: 2,
-    splashRadius: 1,
-    special: 'AoE splash damage',
-  },
-  {
-    id: 'water_t1',
-    name: 'Frost Fountain',
-    elements: ['water'],
-    tier: 1,
-    cost: 3,
-    damage: 5,
-    attackSpeed: 1.0,
-    range: 2.5,
-    special: 'Slows target by 25% for 2s',
-  },
-  {
-    id: 'earth_t1',
-    name: 'Stone Sentinel',
-    elements: ['earth'],
-    tier: 1,
-    cost: 3,
-    damage: 14,
-    attackSpeed: 0.4,
-    range: 2,
-    special: 'High single-target damage',
-  },
-  {
-    id: 'wind_t1',
-    name: 'Gale Archer',
-    elements: ['wind'],
-    tier: 1,
-    cost: 3,
-    damage: 4,
-    attackSpeed: 1.6,
-    range: 3,
-    special: 'Fast attacks, long range',
-  },
-  {
-    id: 'light_t1',
-    name: 'Radiance Beacon',
-    elements: ['light'],
+    id: 'archer',
+    name: 'Archer',
+    elements: [],  // No base element
     tier: 1,
     cost: 3,
     damage: 6,
-    attackSpeed: 0.8,
-    range: 2.5,
-    special: 'Reveals invisible mobs in range, +10% damage aura to adjacent towers',
-  },
-  {
-    id: 'dark_t1',
-    name: 'Shadow Caster',
-    elements: ['dark'],
-    tier: 1,
-    cost: 3,
-    damage: 3,
-    attackSpeed: 0.8,
-    range: 2.5,
-    special: 'Applies poison: 3 dps for 3s (stacks)',
-  },
-];
-
-// ── T2 Towers (Dual Element Combos) ────────────────────
-
-export const T2_TOWERS: TowerDef[] = [
-  {
-    id: 'steam_t2',
-    name: 'Steam Engine',
-    elements: ['fire', 'water'],
-    tier: 2,
-    cost: 4,
-    damage: 15,
-    attackSpeed: 1.0,
-    range: 2.5,
-    splashRadius: 1.5,
-    special: 'AoE slow zone + tick damage',
-  },
-  {
-    id: 'magma_t2',
-    name: 'Magma Cannon',
-    elements: ['fire', 'earth'],
-    tier: 2,
-    cost: 4,
-    damage: 30,
-    attackSpeed: 0.4,
-    range: 2,
-    special: 'Massive hit, leaves burning ground (5 dps, 2s)',
-  },
-  {
-    id: 'inferno_t2',
-    name: 'Inferno Tornado',
-    elements: ['fire', 'wind'],
-    tier: 2,
-    cost: 4,
-    damage: 10,
     attackSpeed: 1.5,
     range: 3,
-    splashRadius: 1,
-    special: 'Moving AoE that follows the path',
+    special: 'Fast single-target attacks',
   },
   {
-    id: 'solar_t2',
-    name: 'Solar Flare',
-    elements: ['fire', 'light'],
-    tier: 2,
-    cost: 4,
-    damage: 18,
-    attackSpeed: 0.8,
-    range: 3,
-    special: 'Burst damage, blinds target (50% slow for 1s)',
-  },
-  {
-    id: 'hellfire_t2',
-    name: 'Hellfire Pyre',
-    elements: ['fire', 'dark'],
-    tier: 2,
-    cost: 4,
-    damage: 8,
-    attackSpeed: 1.2,
-    range: 2.5,
-    splashRadius: 1,
-    special: 'AoE + stacking DoT (3 dps per stack, max 5)',
-  },
-  {
-    id: 'mud_t2',
-    name: 'Mudslide Trap',
-    elements: ['water', 'earth'],
-    tier: 2,
-    cost: 4,
-    damage: 5,
-    attackSpeed: 0.8,
-    range: 2,
-    special: 'Creates slow zone on path (40% slow, 3s)',
-  },
-  {
-    id: 'tsunami_t2',
-    name: 'Tsunami Wave',
-    elements: ['water', 'wind'],
-    tier: 2,
+    id: 'cannon',
+    name: 'Cannon',
+    elements: [],  // No base element
+    tier: 1,
     cost: 4,
     damage: 12,
     attackSpeed: 0.6,
-    range: 3,
-    special: 'Periodic knockback wave (pushes mobs back 1 cell)',
+    range: 2,
+    splashRadius: 1,
+    special: 'Slow AoE splash damage',
   },
   {
-    id: 'purify_t2',
-    name: 'Purify Spring',
-    elements: ['water', 'light'],
-    tier: 2,
-    cost: 4,
+    id: 'mage',
+    name: 'Mage',
+    elements: [],  // No base element
+    tier: 1,
+    cost: 5,
     damage: 8,
     attackSpeed: 1.0,
-    range: 3,
-    special: 'Reveals invisible + heals adjacent towers (anti Siege Golem)',
-  },
-  {
-    id: 'venom_t2',
-    name: 'Venom Tide',
-    elements: ['water', 'dark'],
-    tier: 2,
-    cost: 4,
-    damage: 6,
-    attackSpeed: 1.0,
     range: 2.5,
-    special: 'Stacking poison (5 dps/stack). On kill, spreads to nearest mob',
-  },
-  {
-    id: 'sandstorm_t2',
-    name: 'Sandstorm Pillar',
-    elements: ['earth', 'wind'],
-    tier: 2,
-    cost: 4,
-    damage: 14,
-    attackSpeed: 0.7,
-    range: 3,
-    special: '20% chance mobs in range miss a path step (stumble)',
-  },
-  {
-    id: 'crystal_t2',
-    name: 'Crystal Guardian',
-    elements: ['earth', 'light'],
-    tier: 2,
-    cost: 4,
-    damage: 10,
-    attackSpeed: 0.8,
-    range: 2,
-    special: 'Shield aura: adjacent towers take 50% less from Siege Golem',
-  },
-  {
-    id: 'grave_t2',
-    name: 'Grave Monolith',
-    elements: ['earth', 'dark'],
-    tier: 2,
-    cost: 4,
-    damage: 16,
-    attackSpeed: 0.6,
-    range: 2,
-    special: 'Killed mobs become blockers for 2s (other mobs path around)',
-  },
-  {
-    id: 'lightning_t2',
-    name: 'Lightning Spire',
-    elements: ['wind', 'light'],
-    tier: 2,
-    cost: 4,
-    damage: 9,
-    attackSpeed: 1.5,
-    range: 3.5,
-    special: 'Chain lightning: bounces to 2 nearby mobs (50% damage each)',
-  },
-  {
-    id: 'phantom_t2',
-    name: 'Phantom Gust',
-    elements: ['wind', 'dark'],
-    tier: 2,
-    cost: 4,
-    damage: 7,
-    attackSpeed: 1.8,
-    range: 3,
-    special: '10% chance to confuse mob (reverses direction for 1s)',
-  },
-  {
-    id: 'eclipse_t2',
-    name: 'Eclipse Tower',
-    elements: ['light', 'dark'],
-    tier: 2,
-    cost: 4,
-    damage: 14,
-    attackSpeed: 1.0,
-    range: 3,
-    special: 'Alternates: even seconds = buff allies (+15% AS), odd = debuff mobs (-15% speed)',
+    special: 'Moderate damage, can apply effects',
   },
 ];
 
-// ── All Towers ──────────────────────────────────────────
+// ── Element Crystal Definitions ────────────────────────────
 
-export const ALL_TOWERS: TowerDef[] = [...T1_TOWERS, ...T2_TOWERS];
+export interface ElementCrystal {
+  id: string;
+  element: Element;
+  name: string;
+  cost: number;
+}
+
+export const ELEMENT_CRYSTALS: ElementCrystal[] = [
+  { id: 'fire_crystal', element: 'fire', name: 'Fire Crystal', cost: 4 },
+  { id: 'water_crystal', element: 'water', name: 'Water Crystal', cost: 4 },
+  { id: 'earth_crystal', element: 'earth', name: 'Earth Crystal', cost: 4 },
+  { id: 'wind_crystal', element: 'wind', name: 'Wind Crystal', cost: 4 },
+  { id: 'light_crystal', element: 'light', name: 'Light Crystal', cost: 4 },
+  { id: 'dark_crystal', element: 'dark', name: 'Dark Crystal', cost: 4 },
+];
+
+// ── Element Effects ──────────────────────────────────────────
+
+export interface ElementEffect {
+  element: Element;
+  name: string;
+  description: string;
+  damageBonus: number;
+  attackSpeedBonus: number;
+  rangeBonus: number;
+  dotType?: 'burn' | 'poison';
+  dotDps?: number;
+  dotDuration?: number;
+  slowPercent?: number;
+  slowDuration?: number;
+}
+
+export const ELEMENT_EFFECTS: Record<Element, ElementEffect> = {
+  fire: {
+    element: 'fire',
+    name: 'Burn',
+    description: 'Applies burning damage over time',
+    damageBonus: 0,
+    attackSpeedBonus: 0,
+    rangeBonus: 0,
+    dotType: 'burn',
+    dotDps: 3,
+    dotDuration: 3000,
+  },
+  water: {
+    element: 'water',
+    name: 'Slow',
+    description: 'Slows target movement',
+    damageBonus: 0,
+    attackSpeedBonus: 0,
+    rangeBonus: 0,
+    slowPercent: 25,
+    slowDuration: 2000,
+  },
+  earth: {
+    element: 'earth',
+    name: 'Power',
+    description: 'Bonus damage against single targets',
+    damageBonus: 0.4, // +40% damage
+    attackSpeedBonus: 0,
+    rangeBonus: 0,
+  },
+  wind: {
+    element: 'wind',
+    name: 'Speed',
+    description: 'Increased attack speed',
+    damageBonus: 0,
+    attackSpeedBonus: 0.3, // +30% attack speed
+    rangeBonus: 0,
+  },
+  light: {
+    element: 'light',
+    name: 'Reveal',
+    description: 'Extended range and reveals invisible mobs',
+    damageBonus: 0,
+    attackSpeedBonus: 0,
+    rangeBonus: 1, // +1 cell range
+  },
+  dark: {
+    element: 'dark',
+    name: 'Poison',
+    description: 'Applies stacking poison damage',
+    damageBonus: 0,
+    attackSpeedBonus: 0,
+    rangeBonus: 0,
+    dotType: 'poison',
+    dotDps: 4,
+    dotDuration: 3000,
+  },
+};
+
+// ── Dynamic Tower Stats Calculation ──────────────────────
+
+export interface TowerStats {
+  damage: number;
+  attackSpeed: number;
+  range: number;
+  splashRadius?: number;
+  effects: ElementEffect[];
+  displayName: string;
+}
+
+/**
+ * Calculate final tower stats based on base tower + applied elements + element points
+ */
+export function getTowerStats(
+  baseDef: TowerDef, 
+  appliedElements: Element[], 
+  elementPoints: Record<Element, number>
+): TowerStats {
+  let damage = baseDef.damage;
+  let attackSpeed = baseDef.attackSpeed;
+  let range = baseDef.range;
+  const effects: ElementEffect[] = [];
+  
+  // Apply element bonuses
+  for (const element of appliedElements) {
+    const effect = ELEMENT_EFFECTS[element];
+    const points = elementPoints[element] || 0;
+    
+    // Element-specific bonuses
+    damage += baseDef.damage * effect.damageBonus;
+    attackSpeed += baseDef.attackSpeed * effect.attackSpeedBonus;
+    range += effect.rangeBonus;
+    
+    // Global element points damage bonus
+    const pointsBonus = ELEMENT_DAMAGE_BONUS[points] || 0;
+    damage += baseDef.damage * pointsBonus;
+    
+    effects.push(effect);
+  }
+  
+  // Generate display name
+  let displayName = baseDef.name;
+  if (appliedElements.length === 1) {
+    const element = appliedElements[0];
+    const elementName = element.charAt(0).toUpperCase() + element.slice(1);
+    displayName = `${elementName} ${baseDef.name}`;
+  } else if (appliedElements.length === 2) {
+    const elem1 = appliedElements[0].charAt(0).toUpperCase() + appliedElements[0].slice(1);
+    const elem2 = appliedElements[1].charAt(0).toUpperCase() + appliedElements[1].slice(1);
+    displayName = `${elem1}-${elem2} ${baseDef.name}`;
+  }
+  
+  return {
+    damage: Math.round(damage * 10) / 10, // Round to 1 decimal
+    attackSpeed: Math.round(attackSpeed * 100) / 100, // Round to 2 decimals
+    range,
+    splashRadius: baseDef.splashRadius,
+    effects,
+    displayName,
+  };
+}
+
+// ── Legacy Compatibility ──────────────────────────────────
+
+// Keep old towers array and map for compatibility with existing code
+export const ALL_TOWERS: TowerDef[] = [...BASE_TOWERS];
 
 export const TOWER_MAP: Record<string, TowerDef> = Object.fromEntries(
   ALL_TOWERS.map((t) => [t.id, t])
 );
 
-// ── Element Combo Lookup ────────────────────────────────
-
-/** Get T2 tower for a pair of elements (order-independent) */
-export function getComboTower(a: Element, b: Element): TowerDef | undefined {
-  return T2_TOWERS.find(
-    (t) =>
-      t.elements.length === 2 &&
-      t.elements.includes(a) &&
-      t.elements.includes(b)
-  );
-}
-
-// ── Hexes ───────────────────────────────────────────────
+// ── Hexes (unchanged from original) ───────────────────────
 
 export const HEXES: HexDef[] = [
   // Tier 1

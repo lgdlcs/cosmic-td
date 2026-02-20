@@ -5,8 +5,6 @@ import {
   MAX_INTEREST,
   CLEAN_BONUS,
   STREAK_BONUS,
-  XP_PER_ROUND,
-  XP_REQUIREMENTS,
   KILL_REWARD_TIERS,
 } from '@ect/shared';
 
@@ -38,20 +36,6 @@ export class EconomyManager {
     income += STREAK_BONUS[streakIdx];
 
     player.gold += income;
-  }
-
-  /** Grant passive XP each round */
-  grantPassiveXp() {
-    this.state.players.filter((p) => p.alive).forEach((p) => {
-      p.xp += XP_PER_ROUND;
-
-      // Check level up
-      while (p.level < 6 && p.xp >= p.xpToNext) {
-        p.xp -= p.xpToNext;
-        p.level++;
-        p.xpToNext = XP_REQUIREMENTS[p.level + 1] || 99;
-      }
-    });
   }
 
   /** Gold reward for killing a mob */

@@ -10,7 +10,6 @@ export const STARTING_GOLD = 50; // More gold for testing
 export const STARTING_LEVEL = 1;
 export const MAX_LEVEL = 6;
 export const SHOP_SLOTS = 5;
-export const BENCH_SIZE = 8;
 export const TOTAL_ROUNDS = 30;
 
 // ── Timing ──────────────────────────────────────────────
@@ -24,60 +23,24 @@ export const FIRST_SHOP_PHASE_DURATION = 30;    // more time on round 1
 // ── Economy ─────────────────────────────────────────────
 
 export const REROLL_COST = 2;
-export const XP_COST = 2; // Cheaper level up for testing
-export const XP_PER_PURCHASE = 4;
-export const XP_PER_ROUND = 2;
 export const BASE_INCOME = 5;
 export const INTEREST_PER_10G = 1;
 export const MAX_INTEREST = 5;
 export const CLEAN_BONUS = 3;
 export const STREAK_BONUS = [0, 0, 1, 1, 2, 2, 3]; // index = streak count, 3 max
 
-// ── Level / XP Requirements ─────────────────────────────
+// ── Element System ──────────────────────────────────────
 
-export const XP_REQUIREMENTS: Record<number, number> = {
-  1: 0,
-  2: 4,
-  3: 8,
-  4: 12,
-  5: 16,
-  6: 24,
-};
-
-// ── Shop Odds (% chance per tier at each level) ─────────
-
-export const SHOP_ODDS: Record<number, [number, number, number]> = {
-  1: [100, 0, 0],
-  2: [80, 20, 0],
-  3: [60, 35, 5],
-  4: [40, 45, 15],
-  5: [25, 40, 35],
-  6: [15, 30, 55],
-};
-
-// ── Tower Pool Sizes ────────────────────────────────────
-
-export const POOL_SIZE_T1 = 30;
-export const POOL_SIZE_T2 = 15;
-export const POOL_SIZE_T3 = 8;
+export const UPGRADE_COST_T1 = 3;                // Cost to apply first element
+export const UPGRADE_COST_T2 = 5;                // Cost to apply second element
+export const ELEMENT_DAMAGE_BONUS = [0, 0, 0.15, 0.30]; // Damage bonus per element point (0-3)
+export const CRYSTAL_SHOP_CHANCE = 0.2;          // 20% chance a shop slot contains a crystal
+export const CRYSTAL_COST = 4;                   // Cost of element crystals in shop
 
 // ── Tower Costs ─────────────────────────────────────────
 
-export const TOWER_COST = { 1: 3, 2: 4, 3: 5 } as const;
+export const BASE_TOWER_COSTS = { archer: 3, cannon: 4, mage: 5 } as const;
 export const SELL_REFUND_RATIO = 0.7; // 70% of cost back
-
-// ── Fusion ──────────────────────────────────────────────
-
-export const FUSION_COUNT = 3;                  // 3 copies → star up
-export const STAR_DAMAGE_MULT = [1.0, 1.5, 2.0]; // base, ★, ★★
-
-// ── Synergy Bonuses ─────────────────────────────────────
-
-export const SYNERGY_THRESHOLDS = [
-  { count: 2, bonus: 0.10 },  // +10% attack speed
-  { count: 3, bonus: 0.20 },  // +20% damage
-  { count: 4, bonus: 0.30 },  // +30% damage + special proc
-];
 
 // ── Element Colors (hex codes for rendering) ────────────
 

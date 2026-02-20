@@ -4,7 +4,6 @@ export type Element = 'fire' | 'water' | 'earth' | 'wind' | 'light' | 'dark';
 export const ELEMENTS: Element[] = ['fire', 'water', 'earth', 'wind', 'light', 'dark'];
 
 export type TowerTier = 1 | 2 | 3;
-export type StarLevel = 0 | 1 | 2;
 
 export type PlayerColor = 'blue' | 'red' | 'green' | 'orange';
 export const PLAYER_COLORS: PlayerColor[] = ['blue', 'red', 'green', 'orange'];
@@ -37,8 +36,7 @@ export interface TowerInstance {
   instanceId: string;
   defId: string;
   position: GridPos;
-  starLevel: StarLevel;
-  elements: Element[]; // copied from def, can be modified by hex
+  appliedElements: Element[];  // 0, 1, or 2 elements applied to this tower
 }
 
 // ── Mob ─────────────────────────────────────────────────
@@ -110,9 +108,10 @@ export interface PlayerState {
   xp: number;
   xpToNext: number;
   towers: TowerInstance[];
-  bench: string[];              // defIds of bought but unplaced towers (max 8)
-  shop: (string | null)[];      // 5 shop slots, defIds or null
-  synergies: Record<Element, number>;
+  elementPoints: Record<Element, number>;  // 0-3 points per element
+  pendingElementPoint: boolean;            // true if player must choose an element this round
+  shop: (string | null)[];                // 5 shop slots, defIds or null
+  synergies: Record<Element, number>;     // kept for compatibility, calculated from elementPoints
   streak: number;
   alive: boolean;
   incomingHex: HexCast | null;
@@ -146,13 +145,11 @@ export interface GameState {
 export type ClientMsg =
   | { type: 'JOIN_LOBBY'; name: string; roomCode?: string }
   | { type: 'READY' }
-  | { type: 'BUY_TOWER'; shopIndex: number }
   | { type: 'BUY_AND_PLACE'; shopIndex: number; position: GridPos }
   | { type: 'SELL_TOWER'; instanceId: string }
-  | { type: 'PLACE_TOWER'; benchIndex: number; position: GridPos }
-  | { type: 'MOVE_TOWER'; instanceId: string; position: GridPos }
+  | { type: 'CHOOSE_ELEMENT'; element: Element }
+  | { type: 'UPGRADE_TOWER'; instanceId: string; element: Element }
   | { type: 'REROLL' }
-  | { type: 'LEVEL_UP' }
   | { type: 'CAST_HEX'; hexId: HexId; targetPlayerId: string }
   | { type: 'DEV_START_COMBAT' };
 

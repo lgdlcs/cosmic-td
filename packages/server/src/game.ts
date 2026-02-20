@@ -16,9 +16,7 @@ import {
   STARTING_HP,
   STARTING_GOLD,
   STARTING_LEVEL,
-  XP_REQUIREMENTS,
   SHOP_SLOTS,
-  BENCH_SIZE,
   PLAYER_COLORS,
   ALL_MAPS,
   ELEMENTS,
@@ -28,11 +26,11 @@ import {
   TICK_MS,
   MOB_SYNC_INTERVAL,
   TOWER_MAP,
-  TOWER_COST,
+  BASE_TOWER_COSTS,
+  UPGRADE_COST_T1,
+  UPGRADE_COST_T2,
   isPathCell,
   HEX_MAP,
-  getComboTower,
-  T1_TOWERS,
 } from '@ect/shared';
 import { ShopManager } from './shop.js';
 import { CombatManager } from './combat.js';
@@ -75,11 +73,12 @@ export class Game {
       gold: STARTING_GOLD,
       level: STARTING_LEVEL,
       xp: 0,
-      xpToNext: XP_REQUIREMENTS[2],
+      xpToNext: 0, // No longer used
       towers: [],
-      bench: [],
+      elementPoints: Object.fromEntries(ELEMENTS.map((e) => [e, 0])) as Record<Element, number>,
+      pendingElementPoint: false, // No pending point on round 1
       shop: Array(SHOP_SLOTS).fill(null),
-      synergies: Object.fromEntries(ELEMENTS.map((e) => [e, 0])) as Record<Element, number>,
+      synergies: Object.fromEntries(ELEMENTS.map((e) => [e, 0])) as Record<Element, number>, // For compatibility
       streak: 0,
       alive: true,
       incomingHex: null,
@@ -116,134 +115,96 @@ export class Game {
       case 'BUY_AND_PLACE': {
         if (this.state.phase !== 'shopping') return;
         if (msg.shopIndex < 0 || msg.shopIndex >= SHOP_SLOTS) return;
-        const defId = player.shop[msg.shopIndex];
-        if (!defId) return;
-        
-        const def = TOWER_MAP[defId];
-        if (!def) return;
-        
-        const cost = TOWER_COST[def.tier as keyof typeof TOWER_COST] || 3;
-        if (player.gold < cost) return;
+        const itemId = player.shop[msg.shopIndex];
+        if (!itemId) return;
         
         // Validate position
         if (isPathCell(this.map, msg.position)) return;
         if (msg.position.row < 0 || msg.position.row >= 8 || msg.position.col < 0 || msg.position.col >= 8) return;
         if (player.towers.some((t) => t.position.row === msg.position.row && t.position.col === msg.position.col)) return;
 
-        // Check for fusion (if player already has 2+ copies of same tower placed)
-        const sameTowers = player.towers.filter((t) => t.defId === defId && t.starLevel === 0);
-        
-        if (sameTowers.length >= 2) {
-          // Fusion! Remove 2 existing towers, create ★ version at new position
-          const toRemove = sameTowers.slice(0, 2);
-          player.towers = player.towers.filter((t) => !toRemove.includes(t));
+        // Check if it's a crystal
+        if (this.shop.isCrystal(itemId)) {
+          const crystal = this.shop.getCrystal(itemId);
+          if (!crystal) return;
           
-          const fused: TowerInstance = {
-            instanceId: nanoid(8),
-            defId,
-            position: msg.position,
-            starLevel: 1,
-            elements: [...def.elements],
-          };
-          player.towers.push(fused);
-        } else {
-          // Normal placement
-          const tower: TowerInstance = {
-            instanceId: nanoid(8),
-            defId,
-            position: msg.position,
-            starLevel: 0,
-            elements: [...def.elements],
-          };
-          player.towers.push(tower);
+          if (player.gold < crystal.cost) return;
+          if (player.elementPoints[crystal.element] >= 3) return; // Max 3 points per element
+
+          player.gold -= crystal.cost;
+          player.elementPoints[crystal.element]++;
+          player.shop[msg.shopIndex] = null;
+
+          this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
+          this.broadcastStateUpdate();
+          return;
         }
+
+        // It's a base tower
+        const def = TOWER_MAP[itemId];
+        if (!def) return;
+        
+        const cost = BASE_TOWER_COSTS[def.id as keyof typeof BASE_TOWER_COSTS] || 3;
+        if (player.gold < cost) return;
+
+        // Create base tower with no applied elements
+        const tower: TowerInstance = {
+          instanceId: nanoid(8),
+          defId: itemId,
+          position: msg.position,
+          appliedElements: [],
+        };
+        player.towers.push(tower);
 
         // Deduct cost and clear shop slot
         player.gold -= cost;
         player.shop[msg.shopIndex] = null;
 
-        // Check for T2 fusion (two different T1 elements → T2 combo)
-        this.checkT2Fusion(player);
-
-        this.updateSynergies(player);
         this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
         this.broadcastStateUpdate();
         break;
       }
-      case 'BUY_TOWER': {
+      case 'CHOOSE_ELEMENT': {
         if (this.state.phase !== 'shopping') return;
-        if (this.shop.buyTower(player, msg.shopIndex)) {
-          this.updateSynergies(player);
-          this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
-          this.broadcastStateUpdate();
-        }
-        break;
-      }
-      case 'PLACE_TOWER': {
-        if (this.state.phase !== 'shopping') return;
-        if (msg.benchIndex < 0 || msg.benchIndex >= player.bench.length) return;
-        const defId = player.bench[msg.benchIndex];
-        if (!defId) return;
-        // Validate position
-        if (isPathCell(this.map, msg.position)) return;
-        if (msg.position.row < 0 || msg.position.row >= 8 || msg.position.col < 0 || msg.position.col >= 8) return;
-        if (player.towers.some((t) => t.position.row === msg.position.row && t.position.col === msg.position.col)) return;
+        if (!player.pendingElementPoint) return; // Player doesn't have a pending point
+        if (player.elementPoints[msg.element] >= 3) return; // Already at max for this element
 
-        const def = TOWER_MAP[defId];
-        if (!def) return;
+        player.elementPoints[msg.element]++;
+        player.pendingElementPoint = false;
 
-        // Check for fusion (3 copies of same tower)
-        const sameTowers = player.towers.filter((t) => t.defId === defId && t.starLevel === 0);
-        const sameBench = player.bench.filter((b) => b === defId);
-
-        if (sameTowers.length >= 2 && sameBench.length >= 1) {
-          // Fuse! Remove 2 placed towers, remove from bench, create ★ version
-          const toRemove = sameTowers.slice(0, 2);
-          player.towers = player.towers.filter((t) => !toRemove.includes(t));
-          player.bench.splice(msg.benchIndex, 1);
-
-          const fused: TowerInstance = {
-            instanceId: nanoid(8),
-            defId,
-            position: msg.position,
-            starLevel: 1,
-            elements: [...def.elements],
-          };
-          player.towers.push(fused);
-        } else {
-          // Normal placement
-          player.bench.splice(msg.benchIndex, 1);
-          const tower: TowerInstance = {
-            instanceId: nanoid(8),
-            defId,
-            position: msg.position,
-            starLevel: 0,
-            elements: [...def.elements],
-          };
-          player.towers.push(tower);
-        }
-
-        // Check for T2 fusion (two different T1 elements → T2 combo tower)
-        this.checkT2Fusion(player);
-
-        this.updateSynergies(player);
         this.broadcastStateUpdate();
         break;
       }
-      case 'MOVE_TOWER': {
+      case 'UPGRADE_TOWER': {
         if (this.state.phase !== 'shopping') return;
         const tower = player.towers.find((t) => t.instanceId === msg.instanceId);
         if (!tower) return;
-        if (isPathCell(this.map, msg.position)) return;
-        if (player.towers.some((t) => t.instanceId !== msg.instanceId && t.position.row === msg.position.row && t.position.col === msg.position.col)) return;
-        tower.position = msg.position;
+
+        // Check if tower already has 2 elements (max)
+        if (tower.appliedElements.length >= 2) return;
+
+        // Check if player has enough points in this element
+        const isT1Upgrade = tower.appliedElements.length === 0;
+        const minPointsRequired = isT1Upgrade ? 1 : 2;
+        if (player.elementPoints[msg.element] < minPointsRequired) return;
+
+        // Check if element is already applied
+        if (tower.appliedElements.includes(msg.element)) return;
+
+        // Check gold
+        const cost = isT1Upgrade ? UPGRADE_COST_T1 : UPGRADE_COST_T2;
+        if (player.gold < cost) return;
+
+        // Apply upgrade
+        player.gold -= cost;
+        tower.appliedElements.push(msg.element);
+
         this.broadcastStateUpdate();
         break;
       }
       case 'SELL_TOWER': {
         if (this.state.phase !== 'shopping') return;
         if (this.shop.sellTower(player, msg.instanceId)) {
-          this.updateSynergies(player);
           this.broadcastStateUpdate();
         }
         break;
@@ -252,13 +213,6 @@ export class Game {
         if (this.state.phase !== 'shopping') return;
         if (this.shop.reroll(player)) {
           this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
-        }
-        break;
-      }
-      case 'LEVEL_UP': {
-        if (this.state.phase !== 'shopping') return;
-        if (this.shop.levelUp(player)) {
-          this.broadcastStateUpdate();
         }
         break;
       }
@@ -280,65 +234,6 @@ export class Game {
         this.broadcast({ type: 'HEX_INCOMING', hex: target.incomingHex });
         this.broadcastStateUpdate();
         break;
-      }
-    }
-  }
-
-  /** Check if placing a tower completes a T2 fusion (two different T1 elements → T2 combo) */
-  private checkT2Fusion(player: PlayerState): boolean {
-    // Get all placed T1 towers (only non-starred base T1 towers)
-    const t1Placed = player.towers.filter(t => {
-      const def = TOWER_MAP[t.defId];
-      return def && def.tier === 1 && t.starLevel === 0;
-    });
-
-    // Check all pairs of placed T1 towers for combo matches
-    for (let i = 0; i < t1Placed.length; i++) {
-      for (let j = i + 1; j < t1Placed.length; j++) {
-        const a = t1Placed[i];
-        const b = t1Placed[j];
-        const elemA = a.elements[0];
-        const elemB = b.elements[0];
-        if (elemA === elemB) continue;
-
-        const combo = getComboTower(elemA, elemB);
-        if (!combo) continue;
-
-        // Fuse! Remove both T1 towers, create T2 at first tower's position
-        player.towers = player.towers.filter(t => t.instanceId !== a.instanceId && t.instanceId !== b.instanceId);
-        const fused: TowerInstance = {
-          instanceId: nanoid(8),
-          defId: combo.id,
-          position: a.position,
-          starLevel: 0,
-          elements: [...combo.elements],
-        };
-        player.towers.push(fused);
-
-        // Broadcast fusion event
-        this.broadcast({
-          type: 'COMBAT_EVENTS',
-          playerId: player.id,
-          attacks: [],
-          kills: [],
-          leaks: [],
-        });
-
-        return true; // Only one fusion per placement
-      }
-    }
-    return false;
-  }
-
-  private updateSynergies(player: PlayerState) {
-    // Reset
-    for (const e of ELEMENTS) {
-      player.synergies[e] = 0;
-    }
-    // Count elements from placed towers
-    for (const tower of player.towers) {
-      for (const elem of tower.elements) {
-        player.synergies[elem]++;
       }
     }
   }
@@ -458,9 +353,11 @@ export class Game {
       p.shop = this.shop.generateShop(p);
     });
 
-    // Grant passive XP
+    // Grant element point choice (except round 1)
     if (this.state.round > 1) {
-      this.economy.grantPassiveXp();
+      this.state.players.filter((p) => p.alive).forEach((p) => {
+        p.pendingElementPoint = true;
+      });
     }
 
     this.broadcast({

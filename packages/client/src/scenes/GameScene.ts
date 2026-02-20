@@ -16,6 +16,9 @@ import {
   TOWER_MAP,
   PLAYER_COLOR_HEX,
   isPathCell,
+  ELEMENT_CRYSTALS,
+  getTowerStats,
+  ELEMENTS,
 } from '@ect/shared';
 
 // ── Procedural Sound Effects (Web Audio API) ───────────
@@ -138,6 +141,13 @@ export class GameScene extends Phaser.Scene {
   private selectedTowerDefId: string | null = null; // defId of selected tower for preview
   private gridHover: GridHover | null = null;
   private hoveredTower: string | null = null; // instanceId of hovered tower
+  
+  // Element choice overlay
+  private elementChoiceOverlay: Phaser.GameObjects.Container | null = null;
+  
+  // Tower upgrade radial menu
+  private upgradeMenu: Phaser.GameObjects.Container | null = null;
+  private upgradeTowerInstance: string | null = null;
 
   // Opponent mini-view graphics
   private miniGfx!: Phaser.GameObjects.Graphics;
@@ -205,30 +215,223 @@ export class GameScene extends Phaser.Scene {
       this.updateTowerHover(ptr);
     });
 
-    // Right click to deselect
+    // Right click to deselect or show upgrade menu
     this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
       if (ptr.rightButtonDown()) {
-        this.selectedShopIndex = -1;
-        this.selectedTowerDefId = null;
-        this.updateUI();
+        const col = Math.floor((ptr.x - GRID_X) / CELL);
+        const row = Math.floor((ptr.y - GRID_Y) / CELL);
+        
+        if (col >= 0 && col < GRID_SIZE && row >= 0 && row < GRID_SIZE && this.gameState.phase === 'shopping') {
+          const me = this.me();
+          const tower = me?.towers.find(t => t.position.row === row && t.position.col === col);
+          
+          if (tower && tower.appliedElements.length < 2) {
+            this.showUpgradeMenu(tower, ptr.x, ptr.y);
+          } else {
+            this.hideUpgradeMenu();
+            this.selectedShopIndex = -1;
+            this.selectedTowerDefId = null;
+            this.updateUI();
+          }
+        } else {
+          this.hideUpgradeMenu();
+          this.selectedShopIndex = -1;
+          this.selectedTowerDefId = null;
+          this.updateUI();
+        }
       }
     });
 
-    // ESC to deselect
+    // ESC to deselect and close menus
     this.input.keyboard?.on('keydown-ESC', () => {
       this.selectedShopIndex = -1;
       this.selectedTowerDefId = null;
+      this.hideUpgradeMenu();
       this.updateUI();
     });
 
     this.msgHandler = (msg) => this.handleMsg(msg);
     socket.onMessage(this.msgHandler);
     this.updateUI();
+    this.checkElementChoice();
+  }
+  
+  private checkElementChoice() {
+    const me = this.me();
+    if (!me || !me.pendingElementPoint) {
+      // Hide element choice overlay if shown
+      if (this.elementChoiceOverlay) {
+        this.elementChoiceOverlay.destroy();
+        this.elementChoiceOverlay = null;
+      }
+      return;
+    }
+
+    if (this.elementChoiceOverlay) return; // Already shown
+
+    // Create element choice overlay
+    const cx = this.cameras.main.centerX;
+    const cy = this.cameras.main.centerY - 100;
+    
+    this.elementChoiceOverlay = this.add.container(cx, cy);
+    
+    // Background
+    const bg = this.add.rectangle(0, 0, 600, 200, 0x1a1a2e, 0.95);
+    bg.setStrokeStyle(3, 0xffd93d);
+    this.elementChoiceOverlay.add(bg);
+    
+    // Title
+    const title = this.add.text(0, -60, '⚡ CHOOSE YOUR ELEMENT! +1 POINT', {
+      fontSize: '24px',
+      color: '#ffd93d',
+      fontStyle: 'bold',
+    }).setOrigin(0.5);
+    this.elementChoiceOverlay.add(title);
+    
+    // Element buttons
+    ELEMENTS.forEach((element, i) => {
+      const x = (i - 2.5) * 90;
+      const symbol = ELEMENT_SYMBOLS[element];
+      const color = ELEMENT_COLORS[element];
+      const currentPoints = me.elementPoints[element] || 0;
+      const canChoose = currentPoints < 3;
+      
+      const btn = this.add.rectangle(x, 10, 70, 60, Phaser.Display.Color.HexStringToColor(color).color, canChoose ? 0.8 : 0.3);
+      btn.setStrokeStyle(2, canChoose ? 0xffffff : 0x666666);
+      
+      const text = this.add.text(x, -5, `${symbol}\n${currentPoints}/3`, {
+        fontSize: '14px',
+        color: canChoose ? '#ffffff' : '#666666',
+        align: 'center',
+        fontStyle: 'bold',
+      }).setOrigin(0.5);
+      
+      if (this.elementChoiceOverlay) {
+        this.elementChoiceOverlay.add(btn);
+        this.elementChoiceOverlay.add(text);
+      }
+      
+      if (canChoose) {
+        btn.setInteractive({ useHandCursor: true });
+        btn.on('pointerdown', () => {
+          socket.send({ type: 'CHOOSE_ELEMENT', element });
+          if (this.elementChoiceOverlay) {
+            this.elementChoiceOverlay.destroy();
+            this.elementChoiceOverlay = null;
+          }
+        });
+        
+        btn.on('pointerover', () => {
+          btn.setAlpha(1);
+          btn.setStrokeStyle(3, 0xffd93d);
+        });
+        
+        btn.on('pointerout', () => {
+          btn.setAlpha(0.8);
+          btn.setStrokeStyle(2, 0xffffff);
+        });
+      }
+    });
+    
+    this.elementChoiceOverlay.setDepth(20);
+  }
+
+  private showUpgradeMenu(tower: any, x: number, y: number) {
+    this.hideUpgradeMenu();
+    
+    const me = this.me();
+    if (!me) return;
+    
+    this.upgradeTowerInstance = tower.instanceId;
+    this.upgradeMenu = this.add.container(x, y);
+    
+    const isT1Upgrade = tower.appliedElements.length === 0;
+    const cost = isT1Upgrade ? 3 : 5;
+    const minPointsRequired = isT1Upgrade ? 1 : 2;
+    
+    // Background circle
+    const bg = this.add.circle(0, 0, 80, 0x1a1a2e, 0.9);
+    bg.setStrokeStyle(2, 0xffd93d);
+    this.upgradeMenu.add(bg);
+    
+    // Title
+    const title = this.add.text(0, 0, `Upgrade\n${cost}g`, {
+      fontSize: '12px',
+      color: '#ffd93d',
+      align: 'center',
+      fontStyle: 'bold',
+    }).setOrigin(0.5);
+    this.upgradeMenu.add(title);
+    
+    // Element buttons in circle
+    ELEMENTS.forEach((element, i) => {
+      const angle = (i * Math.PI * 2) / 6 - Math.PI / 2; // Start from top
+      const radius = 60;
+      const btnX = Math.cos(angle) * radius;
+      const btnY = Math.sin(angle) * radius;
+      
+      const playerPoints = me.elementPoints[element] || 0;
+      const alreadyApplied = tower.appliedElements.includes(element);
+      const canApply = playerPoints >= minPointsRequired && !alreadyApplied && me.gold >= cost;
+      
+      const color = Phaser.Display.Color.HexStringToColor(ELEMENT_COLORS[element]).color;
+      const btn = this.add.circle(btnX, btnY, 18, color, canApply ? 0.8 : 0.3);
+      btn.setStrokeStyle(2, canApply ? 0xffffff : 0x666666);
+      
+      if (alreadyApplied) {
+        // Show checkmark for already applied elements
+        const check = this.add.text(btnX, btnY, '✓', {
+          fontSize: '14px',
+          color: '#00ff00',
+          fontStyle: 'bold',
+        }).setOrigin(0.5);
+        if (this.upgradeMenu) this.upgradeMenu.add(check);
+      } else {
+        const symbol = this.add.text(btnX, btnY, ELEMENT_SYMBOLS[element], {
+          fontSize: '12px',
+          color: canApply ? '#ffffff' : '#666666',
+          fontStyle: 'bold',
+        }).setOrigin(0.5);
+        if (this.upgradeMenu) this.upgradeMenu.add(symbol);
+      }
+      
+      if (this.upgradeMenu) this.upgradeMenu.add(btn);
+      
+      if (canApply) {
+        btn.setInteractive({ useHandCursor: true });
+        btn.on('pointerdown', () => {
+          socket.send({ type: 'UPGRADE_TOWER', instanceId: tower.instanceId, element });
+          this.hideUpgradeMenu();
+        });
+        
+        btn.on('pointerover', () => {
+          btn.setStrokeStyle(3, 0xffd93d);
+          btn.setAlpha(1);
+        });
+        
+        btn.on('pointerout', () => {
+          btn.setStrokeStyle(2, 0xffffff);
+          btn.setAlpha(0.8);
+        });
+      }
+    });
+    
+    this.upgradeMenu.setDepth(15);
+  }
+
+  private hideUpgradeMenu() {
+    if (this.upgradeMenu) {
+      this.upgradeMenu.destroy();
+      this.upgradeMenu = null;
+    }
+    this.upgradeTowerInstance = null;
   }
 
   shutdown() {
     if (this.msgHandler) socket.offMessage(this.msgHandler);
     if (this.timerEvent) this.timerEvent.destroy();
+    if (this.elementChoiceOverlay) this.elementChoiceOverlay.destroy();
+    if (this.upgradeMenu) this.upgradeMenu.destroy();
   }
 
   update(_time: number, delta: number) {
@@ -261,6 +464,7 @@ export class GameScene extends Phaser.Scene {
       case 'STATE_UPDATE':
         this.gameState = msg.state;
         this.updateUI();
+        this.checkElementChoice();
         break;
 
       case 'PHASE_CHANGE':
@@ -280,17 +484,8 @@ export class GameScene extends Phaser.Scene {
       case 'SHOP_UPDATE': {
         const me = this.me();
         if (me) {
-          // Check for shop slot changes to trigger flash effect
-          const oldShop = me.shop.slice();
           me.shop = msg.shop;
           me.gold = msg.gold;
-          
-          // Find slots that became empty (purchased)
-          for (let i = 0; i < 5; i++) {
-            if (oldShop[i] && !msg.shop[i]) {
-              this.triggerShopFlash(i);
-            }
-          }
           
           this.updateUI();
         }
@@ -498,31 +693,44 @@ export class GameScene extends Phaser.Scene {
         this.hoveredTower = tower.instanceId;
         const def = TOWER_MAP[tower.defId];
         if (def) {
-          const elems = def.elements.map(e => `${ELEMENT_SYMBOLS[e]}${e}`).join(', ');
-          const starLabel = tower.starLevel > 0 ? ` ${'★'.repeat(tower.starLevel)}` : '';
-          const tierLabel = `T${def.tier}`;
+          // Calculate actual stats using new system
+          const me = this.me();
+          if (!me) return;
           
-          // Calculate actual damage with star multiplier
-          const baseDamage = def.damage;
-          const starMult = tower.starLevel === 0 ? 1.0 : tower.starLevel === 1 ? 1.5 : 2.0;
-          const actualDamage = Math.floor(baseDamage * starMult);
+          const towerStats = getTowerStats(def, tower.appliedElements, me.elementPoints);
           
-          const sellPrice = Math.floor(def.cost * 0.7);
+          const elems = tower.appliedElements.length > 0 
+            ? tower.appliedElements.map(e => `${ELEMENT_SYMBOLS[e]}${e}`).join(', ')
+            : 'No elements';
           
-          let info = `${def.name}${starLabel} (${tierLabel})\n`;
-          info += `${elems}\n`;
-          info += `DMG: ${actualDamage}  ATK SPD: ${def.attackSpeed}/s  RANGE: ${def.range}`;
+          // Calculate sell price including upgrades
+          let sellPrice = Math.floor(def.cost * 0.7);
+          if (tower.appliedElements.length >= 1) sellPrice += Math.floor(3 * 0.7);
+          if (tower.appliedElements.length >= 2) sellPrice += Math.floor(5 * 0.7);
+          
+          let info = `${towerStats.displayName}\n`;
+          info += `Elements: ${elems}\n`;
+          info += `DMG: ${towerStats.damage}  ATK SPD: ${towerStats.attackSpeed}/s  RANGE: ${towerStats.range}`;
           
           if (def.special) {
-            info += `\nSpecial: ${def.special}`;
+            info += `\nBase: ${def.special}`;
           }
           
-          if (def.splashRadius) {
-            info += `\nSplash radius: ${def.splashRadius}`;
+          if (towerStats.splashRadius) {
+            info += `\nSplash radius: ${towerStats.splashRadius}`;
+          }
+          
+          // Show element effects
+          if (towerStats.effects.length > 0) {
+            info += `\nEffects: ${towerStats.effects.map(e => e.name).join(', ')}`;
           }
           
           if (this.gameState.phase === 'shopping') {
             info += `\n💰 Click to sell for ${sellPrice}g`;
+            if (tower.appliedElements.length < 2) {
+              const cost = tower.appliedElements.length === 0 ? 3 : 5;
+              info += `\n⚡ Right-click to upgrade (${cost}g)`;
+            }
           }
           
           this.uiTowerHoverInfo.setText(info);
@@ -624,28 +832,6 @@ export class GameScene extends Phaser.Scene {
 
   private drawFX() {
     this.fxGfx.clear();
-    
-    // Fusion indicator glow for shop slots
-    const me = this.me();
-    if (me && this.gameState.phase === 'shopping') {
-      for (let i = 0; i < 5; i++) {
-        const defId = me.shop[i];
-        if (defId) {
-          const sameTowersPlaced = me.towers.filter(t => t.defId === defId && t.starLevel === 0);
-          if (sameTowersPlaced.length >= 2) {
-            const slot = this.uiShopSlots[i];
-            if (slot) {
-              const bounds = slot.getBounds();
-              const glowAlpha = (Math.sin(Date.now() * 0.008) + 1) * 0.3 + 0.2; // Pulsing glow
-              this.fxGfx.lineStyle(3, 0xffd93d, glowAlpha);
-              this.fxGfx.strokeRect(bounds.x - 6, bounds.y - 6, bounds.width + 12, bounds.height + 12);
-              this.fxGfx.fillStyle(0xffd93d, glowAlpha * 0.1);
-              this.fxGfx.fillRect(bounds.x - 6, bounds.y - 6, bounds.width + 12, bounds.height + 12);
-            }
-          }
-        }
-      }
-    }
 
     // Projectiles
     for (const p of this.projectiles) {
@@ -849,82 +1035,68 @@ export class GameScene extends Phaser.Scene {
 
       const cx = GRID_X + tower.position.col * CELL + CELL / 2;
       const cy = GRID_Y + tower.position.row * CELL + CELL / 2;
-      const elemColor = Phaser.Display.Color.HexStringToColor(
-        ELEMENT_COLORS[tower.elements[0] || 'fire']
-      ).color;
+      
+      // Use first applied element for primary color, or default gray
+      const primaryElement = tower.appliedElements[0];
+      const elemColor = primaryElement 
+        ? Phaser.Display.Color.HexStringToColor(ELEMENT_COLORS[primaryElement]).color
+        : 0x666666; // Gray for base towers
 
       const size = 20;
 
+      // Calculate actual range using tower stats
+      const towerStats = getTowerStats(def, tower.appliedElements, me.elementPoints);
+      const actualRange = towerStats.range;
+      
       // Range circle — prominent when hovered, subtle otherwise
       const isHovered = this.hoveredTower === tower.instanceId;
       if (isHovered) {
         this.towerGfx.fillStyle(elemColor, 0.08);
-        this.towerGfx.fillCircle(cx, cy, def.range * CELL);
+        this.towerGfx.fillCircle(cx, cy, actualRange * CELL);
         this.towerGfx.lineStyle(2, elemColor, 0.5);
-        this.towerGfx.strokeCircle(cx, cy, def.range * CELL);
+        this.towerGfx.strokeCircle(cx, cy, actualRange * CELL);
       } else {
         this.towerGfx.lineStyle(1, elemColor, 0.08);
-        this.towerGfx.strokeCircle(cx, cy, def.range * CELL);
+        this.towerGfx.strokeCircle(cx, cy, actualRange * CELL);
       }
 
       // Base platform
       this.towerGfx.fillStyle(0x111122, 0.6);
       this.towerGfx.fillCircle(cx, cy + 4, size + 2);
 
-      // Tower shape by element
+      // Tower shape by base type
       this.towerGfx.fillStyle(elemColor, 0.9);
-      const elem = tower.elements[0];
-      switch (elem) {
-        case 'fire':
-          // Triangle (pointing up)
+      switch (def.id) {
+        case 'archer':
+          // Triangle (pointing up) for archers
           this.towerGfx.fillTriangle(cx, cy - size, cx - size * 0.8, cy + size * 0.6, cx + size * 0.8, cy + size * 0.6);
           break;
-        case 'water':
-          // Inverted triangle
-          this.towerGfx.fillTriangle(cx, cy + size, cx - size * 0.8, cy - size * 0.6, cx + size * 0.8, cy - size * 0.6);
-          break;
-        case 'earth':
-          // Square
+        case 'cannon':
+          // Square for cannons
           this.towerGfx.fillRect(cx - size * 0.7, cy - size * 0.7, size * 1.4, size * 1.4);
           break;
-        case 'wind':
-          // Diamond
-          this.towerGfx.fillTriangle(cx, cy - size, cx + size, cy, cx, cy + size);
-          this.towerGfx.fillTriangle(cx, cy - size, cx - size, cy, cx, cy + size);
-          break;
-        case 'light':
-          // Star-ish (circle with glow)
+        case 'mage':
+          // Circle for mages
           this.towerGfx.fillCircle(cx, cy, size * 0.8);
-          this.towerGfx.fillStyle(elemColor, 0.3);
-          this.towerGfx.fillCircle(cx, cy, size * 1.2);
-          break;
-        case 'dark':
-          // Hexagon-ish
-          this.towerGfx.fillCircle(cx, cy, size);
-          this.towerGfx.fillStyle(0x1a1a2e, 0.5);
-          this.towerGfx.fillCircle(cx, cy, size * 0.5);
           break;
         default:
           this.towerGfx.fillCircle(cx, cy, size);
       }
 
-      // Star level indicator
-      if (tower.starLevel > 0) {
-        this.towerGfx.lineStyle(2, 0xFFD93D, 0.8);
+      // Element indicators
+      if (tower.appliedElements.length > 0) {
+        // Primary element glow
+        this.towerGfx.lineStyle(2, elemColor, 0.6);
         this.towerGfx.strokeCircle(cx, cy, size + 4);
-        if (tower.starLevel >= 2) {
-          this.towerGfx.lineStyle(1, 0xFFD93D, 0.5);
-          this.towerGfx.strokeCircle(cx, cy, size + 7);
+        
+        // Second element dot
+        if (tower.appliedElements.length >= 2) {
+          const secondColor = Phaser.Display.Color.HexStringToColor(
+            ELEMENT_COLORS[tower.appliedElements[1]]
+          ).color;
+          this.towerGfx.fillStyle(secondColor, 0.9);
+          this.towerGfx.fillCircle(cx + size * 0.8, cy - size * 0.8, 6);
         }
-      }
-
-      // T2 indicator: second element dot
-      if (tower.elements.length >= 2) {
-        const secondColor = Phaser.Display.Color.HexStringToColor(
-          ELEMENT_COLORS[tower.elements[1]]
-        ).color;
-        this.towerGfx.fillStyle(secondColor, 0.9);
-        this.towerGfx.fillCircle(cx + size * 0.8, cy - size * 0.8, 5);
       }
     }
   }
@@ -1034,12 +1206,6 @@ export class GameScene extends Phaser.Scene {
     }).setDepth(5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => socket.send({ type: 'REROLL' }));
 
-    this.add.text(btnX, shopY + 50, '⬆️ Level Up 4g', {
-      fontSize: '13px', color: '#1a1a2e', backgroundColor: '#4EA8DE',
-      padding: { x: 8, y: 8 },
-    }).setDepth(5).setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => socket.send({ type: 'LEVEL_UP' }));
-
     // DEV: skip shop timer
     this.add.text(btnX, shopY + 86, '▶ SEND WAVE', {
       fontSize: '13px', color: '#1a1a2e', backgroundColor: '#D94A4A',
@@ -1085,22 +1251,22 @@ export class GameScene extends Phaser.Scene {
       
       if (defId) {
         const def = TOWER_MAP[defId];
-        if (def) {
-          const elems = def.elements.map((e) => ELEMENT_SYMBOLS[e]).join('');
+        // Check if it's a crystal or base tower
+        const crystal = ELEMENT_CRYSTALS.find(c => c.id === defId);
+        if (crystal) {
+          const symbol = ELEMENT_SYMBOLS[crystal.element];
+          const displayText = `${symbol} Crystal\n${crystal.cost}g`;
+          const textColor = isSelected ? '#ffd93d' : (ELEMENT_COLORS[crystal.element] || '#eee');
+          const bgColor = isSelected ? '#4a4a0a' : '#0f3460';
           
-          // Check if this would trigger fusion (player has 2+ copies of same tower placed)
-          const sameTowersPlaced = me.towers.filter(t => t.defId === defId && t.starLevel === 0);
-          const willFuse = sameTowersPlaced.length >= 2;
-          
-          let displayText = `${elems} ${def.name}\n${def.cost}g T${def.tier}`;
-          let textColor = isSelected ? '#ffd93d' : (ELEMENT_COLORS[def.elements[0]] || '#eee');
-          let bgColor = isSelected ? '#4a4a0a' : '#0f3460';
-          
-          if (willFuse) {
-            displayText += '\n⭐ FUSE!';
-            bgColor = isSelected ? '#6a4a0a' : '#4a3010'; // Golden background
-            if (!isSelected) textColor = '#ffd93d'; // Golden text
-          }
+          this.uiShopSlots[i]
+            .setText(displayText)
+            .setColor(textColor)
+            .setBackgroundColor(bgColor);
+        } else if (def) {
+          const displayText = `${def.name}\n${def.cost}g`;
+          const textColor = isSelected ? '#ffd93d' : '#eee';
+          const bgColor = isSelected ? '#4a4a0a' : '#0f3460';
           
           this.uiShopSlots[i]
             .setText(displayText)
@@ -1115,31 +1281,35 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Synergies with bonuses
+    // Element points display
     const parts: string[] = [];
-    for (const [elem, count] of Object.entries(me.synergies)) {
-      if (count > 0) {
-        const sym = ELEMENT_SYMBOLS[elem as keyof typeof ELEMENT_SYMBOLS] || elem;
-        let bonus = '';
-        let highlight = false;
-        
-        if (count >= 4) {
-          bonus = ' +30%DMG+PROC';
-          highlight = true;
-        } else if (count >= 3) {
-          bonus = ' +20%DMG';
-          highlight = true;
-        } else if (count >= 2) {
-          bonus = ' +10%AS';
-          highlight = true;
-        }
-        
-        const text = `${sym}×${count}${bonus}`;
-        parts.push(highlight ? `[${text}]` : text);
+    for (const [elem, points] of Object.entries(me.elementPoints)) {
+      const sym = ELEMENT_SYMBOLS[elem as keyof typeof ELEMENT_SYMBOLS] || elem;
+      let bonus = '';
+      let highlight = false;
+      
+      if (points >= 3) {
+        bonus = ' +30%DMG';
+        highlight = true;
+      } else if (points >= 2) {
+        bonus = ' +15%DMG';
+        highlight = true;
+      } else if (points >= 1) {
+        bonus = ' UNLOCKED';
       }
+      
+      const text = `${sym}×${points}${bonus}`;
+      parts.push(highlight ? `[${text}]` : text);
     }
-    const selectionStatus = this.selectedShopIndex >= 0 ? '— Click grid to place tower' : '';
-    this.uiSynergy.setText(`Synergies: ${parts.join('  ') || 'none yet'}  ${selectionStatus}`);
+    
+    let statusText = '';
+    if (me.pendingElementPoint) {
+      statusText = '⚡ CHOOSE ELEMENT FIRST!';
+    } else if (this.selectedShopIndex >= 0) {
+      statusText = '— Click grid to place tower';
+    }
+    
+    this.uiSynergy.setText(`Elements: ${parts.join('  ')}  ${statusText}`);
 
     // Opponents
     const opponents = this.gameState.players.filter((p) => p.id !== this.myId);
@@ -1246,9 +1416,10 @@ export class GameScene extends Phaser.Scene {
 
       // Draw towers
       for (const tower of opp.towers) {
-        const elemColor = Phaser.Display.Color.HexStringToColor(
-          ELEMENT_COLORS[tower.elements[0] || 'fire']
-        ).color;
+        const primaryElement = tower.appliedElements[0];
+        const elemColor = primaryElement
+          ? Phaser.Display.Color.HexStringToColor(ELEMENT_COLORS[primaryElement]).color
+          : 0x666666; // Gray for base towers
         this.miniGfx.fillStyle(elemColor, 0.9);
         this.miniGfx.fillRect(
           baseX + tower.position.col * miniCell + 1,

@@ -14,8 +14,6 @@ import {
   MOB_COUNT_SCALE,
   BOSS_ROUNDS,
   BOSS_HP_MULT,
-  STAR_DAMAGE_MULT,
-  SYNERGY_THRESHOLDS,
   TOWER_MAP,
   RUNNER_SPEED_MULT,
   RUNNER_HP_MULT,
@@ -23,6 +21,7 @@ import {
   TANK_HP_MULT,
   SWARM_COUNT_MULT,
   SWARM_HP_MULT,
+  getTowerStats,
 } from '@ect/shared';
 
 export interface AttackEvent {
@@ -237,11 +236,14 @@ export class CombatManager {
         continue;
       }
 
-      // Find target (closest to exit)
+      // Calculate tower stats using new system
+      const towerStats = getTowerStats(def, tower.appliedElements, player.elementPoints);
+      
+      // Find target (closest to exit) using new tower stats
       const inRange = remaining.filter((m) => {
         const dx = m.x - tower.position.col;
         const dy = m.y - tower.position.row;
-        return Math.sqrt(dx * dx + dy * dy) <= def.range;
+        return Math.sqrt(dx * dx + dy * dy) <= towerStats.range;
       });
 
       if (inRange.length === 0) continue;
@@ -250,10 +252,8 @@ export class CombatManager {
       inRange.sort((a, b) => b.pathIndex - a.pathIndex);
       const target = inRange[0];
 
-      // Calculate damage
-      const synergyBonus = this.getSynergyBonus(player, tower);
-      const starMult = STAR_DAMAGE_MULT[tower.starLevel] || 1;
-      const finalDamage = def.damage * starMult * (1 + synergyBonus);
+      // Use calculated damage
+      const finalDamage = towerStats.damage;
 
       target.hp -= finalDamage;
 
@@ -271,15 +271,11 @@ export class CombatManager {
         }
       }
 
-      // Apply tower special effects
+      // Apply tower special effects based on applied elements
       this.applyTowerEffect(tower, target);
 
-      // Apply synergy special effects at 3+ of same element
-      this.applySynergyEffect(player, tower, target, remaining);
-
-      // Set cooldown with synergy attack speed bonus
-      const attackSpeedBonus = this.getAttackSpeedBonus(player, tower);
-      const effectiveAttackSpeed = def.attackSpeed * (1 + attackSpeedBonus);
+      // Set cooldown using new tower stats
+      const effectiveAttackSpeed = towerStats.attackSpeed;
       this.cooldowns.set(tower.instanceId, 1000 / effectiveAttackSpeed);
 
       // Record attack event
@@ -291,7 +287,7 @@ export class CombatManager {
         targetX: target.x,
         targetY: target.y,
         damage: finalDamage,
-        element: tower.elements[0] || 'fire',
+        element: tower.appliedElements[0] || 'none',
         splash: !!hasSplash,
       });
 
@@ -308,118 +304,31 @@ export class CombatManager {
     return { killed, leaked, remaining, attacks };
   }
 
-  private getSynergyBonus(player: PlayerState, tower: TowerInstance): number {
-    let bonus = 0;
-    for (const element of tower.elements) {
-      const count = player.synergies[element] || 0;
-      for (const threshold of SYNERGY_THRESHOLDS) {
-        if (count >= threshold.count) {
-          bonus = Math.max(bonus, threshold.bonus);
-        }
-      }
-    }
-    return bonus;
-  }
-
-  /** Calculate attack speed bonus from 2-piece synergies */
-  private getAttackSpeedBonus(player: PlayerState, tower: TowerInstance): number {
-    let bonus = 0;
-    for (const element of tower.elements) {
-      const count = player.synergies[element] || 0;
-      if (count >= 2) {
-        bonus = Math.max(bonus, 0.10); // +10% attack speed for 2+ of same element
-      }
-    }
-    return bonus;
-  }
-
-  /** Apply special synergy effects when player has 3+ towers of the same element */
-  private applySynergyEffect(player: PlayerState, tower: TowerInstance, target: MobInstance, allMobs: MobInstance[]) {
-    for (const element of tower.elements) {
-      const count = player.synergies[element] || 0;
-      if (count < 4) continue; // Only 4-piece procs
-
+  private applyTowerEffect(tower: TowerInstance, mob: MobInstance) {
+    // Apply effects based on applied elements
+    for (const element of tower.appliedElements) {
       switch (element) {
         case 'fire':
-          // Fire 4: 20% chance double AoE
-          if (Math.random() < 0.20) {
-            for (const m of allMobs) {
-              if (m === target) continue;
-              const dx = m.x - target.x;
-              const dy = m.y - target.y;
-              if (Math.sqrt(dx * dx + dy * dy) <= 2.0) { // Double radius
-                const def = TOWER_MAP[tower.defId];
-                if (def) {
-                  const synergyBonus = this.getSynergyBonus(player, tower);
-                  const starMult = STAR_DAMAGE_MULT[tower.starLevel] || 1;
-                  const splashDamage = def.damage * starMult * (1 + synergyBonus);
-                  m.hp -= splashDamage;
-                }
-              }
-            }
-          }
+          // Fire: burn DoT (3 dps, 3s)
+          mob.effects.push({ type: 'burn', remaining: 3000, value: 3 });
           break;
         case 'water':
-          // Water 4: slow becomes freeze (1s stun)
-          const slowEffect = target.effects.find(e => e.type === 'slow');
-          if (slowEffect) {
-            // Replace slow with freeze
-            target.effects = target.effects.filter(e => e.type !== 'slow');
-            target.effects.push({ type: 'freeze', remaining: 1000, value: 1.0 });
-          }
-          break;
-        case 'earth':
-          // Earth 4: towers gain +50% HP (resistance to siege golem)
-          // This is handled separately for each tower - for now, strong knockback
-          target.pathIndex = Math.max(0, target.pathIndex - 2);
-          break;
-        case 'wind':
-          // Wind 4: 15% chance double strike
-          if (Math.random() < 0.15) {
-            const def = TOWER_MAP[tower.defId];
-            if (def) {
-              const synergyBonus = this.getSynergyBonus(player, tower);
-              const starMult = STAR_DAMAGE_MULT[tower.starLevel] || 1;
-              const doubleDamage = def.damage * starMult * (1 + synergyBonus);
-              target.hp -= doubleDamage;
-            }
-          }
-          break;
-        case 'light':
-          // Light 4: +1 range (handled in tower stats) + reveal all
-          for (const m of allMobs) {
-            m.visible = true;
+          // Water: slow (25%, 2s)
+          const existingSlow = mob.effects.find((e) => e.type === 'slow' && e.value > 0);
+          if (!existingSlow) {
+            mob.effects.push({ type: 'slow', remaining: 2000, value: 0.25 });
           }
           break;
         case 'dark':
-          // Dark 4: mobs take 3% max HP/s as shadow damage
-          const shadowDamage = target.maxHp * 0.03;
-          target.hp -= shadowDamage;
+          // Dark: poison (4 dps, 3s stacking)
+          mob.effects.push({ type: 'poison', remaining: 3000, value: 4 });
           break;
+        case 'light':
+          // Light: reveal invisible (handled globally elsewhere)
+          mob.visible = true;
+          break;
+        // Earth and wind effects are passive (damage/speed bonuses)
       }
-    }
-  }
-
-  private applyTowerEffect(tower: TowerInstance, mob: MobInstance) {
-    const def = TOWER_MAP[tower.defId];
-    if (!def) return;
-
-    // Water towers slow
-    if (tower.elements.includes('water')) {
-      const existingSlow = mob.effects.find((e) => e.type === 'slow' && e.value > 0);
-      if (!existingSlow) {
-        mob.effects.push({ type: 'slow', remaining: 2000, value: 0.25 });
-      }
-    }
-
-    // Dark towers poison
-    if (tower.elements.includes('dark')) {
-      mob.effects.push({ type: 'poison', remaining: 3000, value: 4 });
-    }
-
-    // Fire towers burn (for non-splash basic fire)
-    if (tower.elements.includes('fire') && !tower.elements.includes('water')) {
-      mob.effects.push({ type: 'burn', remaining: 2000, value: 3 });
     }
   }
 }
