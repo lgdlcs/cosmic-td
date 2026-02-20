@@ -671,7 +671,7 @@ export class GameScene extends Phaser.Scene {
             }
           }
           
-          this.uiTowerHoverInfo.setText(info);
+          this.uiTowerHoverInfo.setText(info).setVisible(true);
           
           // Position tooltip near mouse cursor but keep it on screen
           const tooltipX = Math.min(ptr.x + 15, this.scale.width - 250);
@@ -680,11 +680,11 @@ export class GameScene extends Phaser.Scene {
         }
       } else {
         this.hoveredTower = null;
-        this.uiTowerHoverInfo.setText('');
+        this.uiTowerHoverInfo.setText('').setVisible(false);
       }
     } else {
       this.hoveredTower = null;
-      this.uiTowerHoverInfo.setText('');
+      this.uiTowerHoverInfo.setText('').setVisible(false);
     }
   }
 
