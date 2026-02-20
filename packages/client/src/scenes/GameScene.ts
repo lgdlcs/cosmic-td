@@ -25,6 +25,18 @@ import {
 
 class SoundFX {
   private ctx: AudioContext | null = null;
+  muted: boolean = true; // muted by default
+
+  toggle(): boolean {
+    this.muted = !this.muted;
+    localStorage.setItem('ect_muted', this.muted ? '1' : '0');
+    return this.muted;
+  }
+
+  constructor() {
+    const saved = localStorage.getItem('ect_muted');
+    this.muted = saved === null ? true : saved === '1';
+  }
 
   private getCtx(): AudioContext | null {
     if (!this.ctx) {
@@ -35,6 +47,7 @@ class SoundFX {
   }
 
   private tone(freq: number, duration: number, type: OscillatorType = 'square', volume = 0.15) {
+    if (this.muted) return;
     const ctx = this.getCtx();
     if (!ctx) return;
     const osc = ctx.createOscillator();
@@ -1150,9 +1163,18 @@ export class GameScene extends Phaser.Scene {
       fontSize: '15px', color: '#FFD93D', fontStyle: 'bold',
     }).setDepth(5);
 
-    this.uiTopRight = this.add.text(GRID_X + GRID_PX, 10, '', {
+    this.uiTopRight = this.add.text(GRID_X + GRID_PX - 40, 10, '', {
       fontSize: '15px', color: '#4EA8DE',
     }).setOrigin(1, 0).setDepth(5);
+
+    // Mute button (top right corner)
+    const muteBtn = this.add.text(GRID_X + GRID_PX, 8, sfx.muted ? '🔇' : '🔊', {
+      fontSize: '20px',
+    }).setOrigin(1, 0).setDepth(5).setInteractive({ useHandCursor: true });
+    muteBtn.on('pointerdown', () => {
+      const muted = sfx.toggle();
+      muteBtn.setText(muted ? '🔇' : '🔊');
+    });
 
     // Mob count (during combat)
     this.uiMobCount = this.add.text(GRID_X + GRID_PX, 30, '', {
