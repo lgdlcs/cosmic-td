@@ -19,6 +19,13 @@ import {
   isPathCell,
   getTowerStats,
   getFragmentCost,
+  getUpgradeCost,
+  canUpgradeTower,
+  previewUpgradeStats,
+  getComboName,
+  COMBO_NAMES,
+  BASE_TOWERS,
+  ELEMENT_EFFECTS,
   ELEMENTS,
 } from '@ect/shared';
 
@@ -256,98 +263,137 @@ export class GameScene extends Phaser.Scene {
   
   // Element choice overlay removed - fragments are bought directly from shop
 
+  private upgradePreview: Phaser.GameObjects.Container | null = null;
+
   private showUpgradeMenu(tower: any, x: number, y: number) {
     this.hideUpgradeMenu();
-    
+
     const me = this.me();
     if (!me) return;
-    
+    const baseDef = TOWER_MAP[tower.defId];
+    if (!baseDef) return;
+
     this.upgradeTowerInstance = tower.instanceId;
     this.upgradeMenu = this.add.container(x, y);
-    
-    // Background circle
-    const bg = this.add.circle(0, 0, 80, 0x1a1a2e, 0.9);
+
+    const currentStats = getTowerStats(baseDef, tower.appliedElements, me.totalBought);
+    const tierLabel = tower.appliedElements.length === 0 ? 'T0' : `T${tower.appliedElements.length}`;
+    const nextTier = tower.appliedElements.length + 1;
+    const upgradeCost = getUpgradeCost(tower.appliedElements.length);
+
+    // Background panel
+    const panelW = 180;
+    const panelH = tower.appliedElements.length >= 3 ? 80 : 240;
+    const bg = this.add.rectangle(0, 0, panelW, panelH, 0x1a1a2e, 0.95);
     bg.setStrokeStyle(2, 0xffd93d);
     this.upgradeMenu.add(bg);
-    
-    // Title
-    const title = this.add.text(0, 0, `Upgrade\n(Free)`, {
-      fontSize: '12px',
-      color: '#ffd93d',
-      align: 'center',
-      fontStyle: 'bold',
+
+    let yOff = -panelH / 2 + 14;
+
+    // Tower name + tier
+    const nameText = this.add.text(0, yOff, `${currentStats.displayName} [${tierLabel}]`, {
+      fontSize: '11px', color: '#ffd93d', fontStyle: 'bold', align: 'center',
     }).setOrigin(0.5);
-    this.upgradeMenu.add(title);
-    
-    // Element buttons in circle
-    ELEMENTS.forEach((element, i) => {
-      const angle = (i * Math.PI * 2) / 6 - Math.PI / 2; // Start from top
-      const radius = 60;
-      const btnX = Math.cos(angle) * radius;
-      const btnY = Math.sin(angle) * radius;
-      
-      const playerFragments = me.fragments[element] || 0;
-      const alreadyApplied = tower.appliedElements.includes(element);
-      const canApply = playerFragments >= 1 && !alreadyApplied;
-      
-      const color = Phaser.Display.Color.HexStringToColor(ELEMENT_COLORS[element]).color;
-      const btn = this.add.circle(btnX, btnY, 18, color, canApply ? 0.8 : 0.3);
-      btn.setStrokeStyle(2, canApply ? 0xffffff : 0x666666);
-      
-      if (alreadyApplied) {
-        // Show checkmark for already applied elements
-        const check = this.add.text(btnX, btnY, '✓', {
-          fontSize: '14px',
-          color: '#00ff00',
-          fontStyle: 'bold',
-        }).setOrigin(0.5);
-        if (this.upgradeMenu) this.upgradeMenu.add(check);
-      } else {
-        const symbol = this.add.text(btnX, btnY - 8, ELEMENT_SYMBOLS[element], {
-          fontSize: '12px',
-          color: canApply ? '#ffffff' : '#666666',
-          fontStyle: 'bold',
-        }).setOrigin(0.5);
-        const count = this.add.text(btnX, btnY + 8, `×${playerFragments}`, {
-          fontSize: '10px',
-          color: canApply ? '#ffffff' : '#666666',
-          fontStyle: 'bold',
-        }).setOrigin(0.5);
-        if (this.upgradeMenu) {
-          this.upgradeMenu.add(symbol);
-          this.upgradeMenu.add(count);
+    this.upgradeMenu.add(nameText);
+    yOff += 16;
+
+    // Current stats line
+    const statsLine = `⚔${currentStats.damage} ⚡${currentStats.attackSpeed}/s 📐${currentStats.range}`;
+    const statsText = this.add.text(0, yOff, statsLine, {
+      fontSize: '9px', color: '#aaaaaa', align: 'center',
+    }).setOrigin(0.5);
+    this.upgradeMenu.add(statsText);
+    yOff += 14;
+
+    if (tower.appliedElements.length >= 3) {
+      // Max tier — only show sell
+      const maxText = this.add.text(0, yOff, 'MAX TIER', {
+        fontSize: '10px', color: '#ffd93d', fontStyle: 'bold',
+      }).setOrigin(0.5);
+      this.upgradeMenu.add(maxText);
+      yOff += 16;
+    } else {
+      // Upgrade cost label
+      const costLabel = this.add.text(0, yOff, `Upgrade → T${nextTier} (${upgradeCost}g)`, {
+        fontSize: '10px', color: '#cccccc', fontStyle: 'bold',
+      }).setOrigin(0.5);
+      this.upgradeMenu.add(costLabel);
+      yOff += 16;
+
+      // Element buttons — grid layout
+      const cols = 3;
+      const btnSize = 22;
+      const gap = 4;
+      const startX = -(cols * (btnSize * 2 + gap) - gap) / 2 + btnSize;
+
+      ELEMENTS.forEach((element, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const btnX = startX + col * (btnSize * 2 + gap);
+        const btnY = yOff + row * (btnSize * 2 + gap + 10);
+
+        const alreadyApplied = tower.appliedElements.includes(element);
+        const check = canUpgradeTower(
+          tower.appliedElements, element, me.fragments, me.gold, me.totalBought
+        );
+
+        const color = Phaser.Display.Color.HexStringToColor(ELEMENT_COLORS[element]).color;
+        const btn = this.add.circle(btnX, btnY, btnSize, color, check.canUpgrade ? 0.8 : 0.25);
+        btn.setStrokeStyle(2, alreadyApplied ? 0x00ff00 : check.canUpgrade ? 0xffffff : 0x444444);
+
+        if (alreadyApplied) {
+          const chk = this.add.text(btnX, btnY, '✓', {
+            fontSize: '14px', color: '#00ff00', fontStyle: 'bold',
+          }).setOrigin(0.5);
+          this.upgradeMenu!.add(chk);
+        } else {
+          const sym = this.add.text(btnX, btnY - 6, ELEMENT_SYMBOLS[element], {
+            fontSize: '11px', color: check.canUpgrade ? '#ffffff' : '#555555',
+          }).setOrigin(0.5);
+          const cnt = this.add.text(btnX, btnY + 8, `×${me.fragments[element] || 0}`, {
+            fontSize: '8px', color: check.canUpgrade ? '#ffffff' : '#555555',
+          }).setOrigin(0.5);
+          this.upgradeMenu!.add(sym);
+          this.upgradeMenu!.add(cnt);
+
+          // Reason tooltip for locked elements
+          if (!check.canUpgrade && check.reason) {
+            const reason = this.add.text(btnX, btnY + 18, check.reason, {
+              fontSize: '7px', color: '#ff6666',
+            }).setOrigin(0.5);
+            this.upgradeMenu!.add(reason);
+          }
         }
-      }
-      
-      if (this.upgradeMenu) this.upgradeMenu.add(btn);
-      
-      if (canApply) {
-        btn.setInteractive({ useHandCursor: true });
-        btn.on('pointerdown', () => {
-          socket.send({ type: 'UPGRADE_TOWER', instanceId: tower.instanceId, element });
-          this.hideUpgradeMenu();
-        });
-        
-        btn.on('pointerover', () => {
-          btn.setStrokeStyle(3, 0xffd93d);
-          btn.setAlpha(1);
-        });
-        
-        btn.on('pointerout', () => {
-          btn.setStrokeStyle(2, 0xffffff);
-          btn.setAlpha(0.8);
-        });
-      }
-    });
-    
-    // Sell button at the bottom
-    const sellRefund = Math.floor((tower.appliedElements.length === 0 ? 3 : tower.appliedElements.length === 1 ? 6 : 11) * 0.7);
-    const sellBtn = this.add.text(0, 45, `🗑 Sell (${sellRefund}g)`, {
-      fontSize: '11px',
-      color: '#ff6b6b',
-      backgroundColor: '#2a1a1a',
+
+        this.upgradeMenu!.add(btn);
+
+        if (check.canUpgrade) {
+          btn.setInteractive({ useHandCursor: true });
+          btn.on('pointerdown', () => {
+            socket.send({ type: 'UPGRADE_TOWER', instanceId: tower.instanceId, element });
+            this.hideUpgradeMenu();
+          });
+          btn.on('pointerover', () => {
+            btn.setStrokeStyle(3, 0xffd93d);
+            this.showUpgradePreview(tower, element, me, baseDef, x + panelW / 2 + 10, y);
+          });
+          btn.on('pointerout', () => {
+            btn.setStrokeStyle(2, 0xffffff);
+            this.hideUpgradePreview();
+          });
+        }
+      });
+
+      yOff += Math.ceil(ELEMENTS.length / cols) * (btnSize * 2 + gap + 10) + 4;
+    }
+
+    // Sell button
+    const totalInvested = (tower.appliedElements.length === 0 ? baseDef.cost :
+      baseDef.cost + tower.appliedElements.reduce((sum: number, _: any, idx: number) => sum + getUpgradeCost(idx), 0));
+    const sellRefund = Math.floor(totalInvested * 0.7);
+    const sellBtn = this.add.text(0, panelH / 2 - 16, `🗑 Sell (${sellRefund}g)`, {
+      fontSize: '10px', color: '#ff6b6b', backgroundColor: '#2a1a1a',
       padding: { x: 6, y: 3 },
-      align: 'center',
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
     sellBtn.on('pointerdown', () => {
       socket.send({ type: 'SELL_TOWER', instanceId: tower.instanceId });
@@ -358,7 +404,66 @@ export class GameScene extends Phaser.Scene {
     this.upgradeMenu.setDepth(15);
   }
 
+  private showUpgradePreview(tower: any, element: Element, me: PlayerState, baseDef: any, px: number, py: number) {
+    this.hideUpgradePreview();
+    const { before, after } = previewUpgradeStats(baseDef, tower.appliedElements, element, me.totalBought);
+
+    this.upgradePreview = this.add.container(px, py);
+    const pw = 160;
+    const ph = 100;
+    const bg = this.add.rectangle(0, 0, pw, ph, 0x111122, 0.95);
+    bg.setStrokeStyle(1, 0x666666);
+    this.upgradePreview.add(bg);
+
+    let yy = -ph / 2 + 12;
+
+    // New name
+    const newName = this.add.text(0, yy, after.displayName, {
+      fontSize: '10px', color: '#ffd93d', fontStyle: 'bold',
+    }).setOrigin(0.5);
+    this.upgradePreview.add(newName);
+    yy += 16;
+
+    // Stat comparisons
+    const stats: { label: string; before: number; after: number; unit: string }[] = [
+      { label: '⚔ DMG', before: before.damage, after: after.damage, unit: '' },
+      { label: '⚡ AS', before: before.attackSpeed, after: after.attackSpeed, unit: '/s' },
+      { label: '📐 Range', before: before.range, after: after.range, unit: '' },
+    ];
+
+    stats.forEach(s => {
+      const diff = s.after - s.before;
+      const diffColor = diff > 0 ? '#44ff44' : diff < 0 ? '#ff4444' : '#888888';
+      const arrow = diff > 0 ? '▲' : diff < 0 ? '▼' : '=';
+      const diffStr = diff !== 0 ? ` ${arrow}${Math.abs(Math.round(diff * 100) / 100)}` : '';
+      const line = `${s.label}: ${s.before}${s.unit} → ${s.after}${s.unit}${diffStr}`;
+      const text = this.add.text(0, yy, line, {
+        fontSize: '9px', color: diffColor,
+      }).setOrigin(0.5);
+      this.upgradePreview!.add(text);
+      yy += 13;
+    });
+
+    // Effects gained
+    const effect = ELEMENT_EFFECTS[element];
+    const effectLine = `+ ${effect.description}`;
+    const effectText = this.add.text(0, yy + 4, effectLine, {
+      fontSize: '9px', color: '#aaddff', fontStyle: 'bold',
+    }).setOrigin(0.5);
+    this.upgradePreview.add(effectText);
+
+    this.upgradePreview.setDepth(16);
+  }
+
+  private hideUpgradePreview() {
+    if (this.upgradePreview) {
+      this.upgradePreview.destroy();
+      this.upgradePreview = null;
+    }
+  }
+
   private hideUpgradeMenu() {
+    this.hideUpgradePreview();
     if (this.upgradeMenu) {
       this.upgradeMenu.destroy();
       this.upgradeMenu = null;

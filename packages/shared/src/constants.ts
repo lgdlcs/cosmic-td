@@ -1,4 +1,4 @@
-import type { Element } from './types.js';
+import type { Element, GameConfig } from './types.js';
 
 // ── Game Config ─────────────────────────────────────────
 
@@ -6,7 +6,13 @@ export const GRID_SIZE = 16;
 export const MAX_PLAYERS = 4;
 export const MIN_PLAYERS = 1; // dev/solo mode. Set to 2 for production
 export const STARTING_HP = 100;
-export const STARTING_GOLD = 50; // More gold for testing
+export const STARTING_GOLD = 50;
+
+export const DEFAULT_GAME_CONFIG: GameConfig = {
+  startingGold: 50,
+  startingHp: 100,
+  fragmentPoolSize: 12,
+};
 export const STARTING_LEVEL = 1;
 export const MAX_LEVEL = 6;
 export const SHOP_SLOTS = 5;
@@ -31,8 +37,10 @@ export const STREAK_BONUS = [0, 0, 1, 1, 2, 2, 3]; // index = streak count, 3 ma
 
 // ── Element System ──────────────────────────────────────
 
-export const UPGRADE_COST_T1 = 0;                // Cost to apply first element (free, only consume fragment)
-export const UPGRADE_COST_T2 = 0;                // Cost to apply second element (free, only consume fragment)
+export const UPGRADE_COST_T1 = 3;                // Cost to apply first element
+export const UPGRADE_COST_T2 = 5;                // Cost to apply second element
+export const UPGRADE_COST_T3 = 8;                // Cost to apply third element
+export const UPGRADE_POINTS_REQUIRED_T3 = 2;     // Each element on tower needs 2+ points for T3
 export const ELEMENT_DAMAGE_BONUS = [0, 0, 0.15, 0.30]; // Damage bonus per element point (0-3)
 
 // ── Fragment System ─────────────────────────────────────

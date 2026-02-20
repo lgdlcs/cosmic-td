@@ -36,7 +36,7 @@ export interface TowerInstance {
   instanceId: string;
   defId: string;
   position: GridPos;
-  appliedElements: Element[];  // 0, 1, or 2 elements applied to this tower
+  appliedElements: Element[];  // 0, 1, 2, or 3 elements applied to this tower
 }
 
 // ── Mob ─────────────────────────────────────────────────
@@ -139,11 +139,20 @@ export interface GameState {
   winner: string | null;
 }
 
+// ── Game Config (lobby settings) ────────────────────────
+
+export interface GameConfig {
+  startingGold: number;
+  startingHp: number;
+  fragmentPoolSize: number;
+}
+
 // ── Network Messages ────────────────────────────────────
 
 // Client → Server
 export type ClientMsg =
   | { type: 'JOIN_LOBBY'; name: string; roomCode?: string }
+  | { type: 'SET_CONFIG'; config: Partial<GameConfig> }
   | { type: 'READY' }
   | { type: 'BUY_AND_PLACE'; shopIndex: number; position: GridPos }
   | { type: 'BUY_FRAGMENT'; shopIndex: number }
@@ -156,7 +165,7 @@ export type ClientMsg =
 // Server → Client
 export type ServerMsg =
   | { type: 'YOUR_ID'; id: string }
-  | { type: 'LOBBY_UPDATE'; players: LobbyPlayer[]; roomCode: string }
+  | { type: 'LOBBY_UPDATE'; players: LobbyPlayer[]; roomCode: string; config: GameConfig; isHost: boolean }
   | { type: 'GAME_START'; state: GameState; mapDef: GameMap }
   | { type: 'PHASE_CHANGE'; phase: GamePhase; round: number; timer: number }
   | { type: 'STATE_UPDATE'; state: GameState }

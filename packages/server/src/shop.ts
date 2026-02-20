@@ -17,12 +17,12 @@ export class ShopManager {
   state: GameState;
   fragmentPool: Map<Element, number>; // shared pool of fragments
 
-  constructor(state: GameState) {
+  constructor(state: GameState, fragmentPoolSize?: number) {
     this.state = state;
-    // Initialize fragment pool: 12 fragments per element
+    const poolSize = fragmentPoolSize ?? FRAGMENT_POOL_SIZE;
     this.fragmentPool = new Map();
     for (const element of ELEMENTS) {
-      this.fragmentPool.set(element, FRAGMENT_POOL_SIZE);
+      this.fragmentPool.set(element, poolSize);
     }
   }
 
@@ -71,12 +71,9 @@ export class ShopManager {
       let refund = def.cost;
       
       // Add upgrade costs for applied elements
-      if (tower.appliedElements.length >= 1) {
-        refund += 3; // T1 upgrade cost
-      }
-      if (tower.appliedElements.length >= 2) {
-        refund += 5; // T2 upgrade cost
-      }
+      if (tower.appliedElements.length >= 1) refund += 3; // T1
+      if (tower.appliedElements.length >= 2) refund += 5; // T2
+      if (tower.appliedElements.length >= 3) refund += 8; // T3
       
       player.gold += Math.floor(refund * SELL_REFUND_RATIO);
     }

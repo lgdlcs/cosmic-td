@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import type { Client } from './index.js';
 import type {
   GameState,
+  GameConfig,
   PlayerState,
   ServerMsg,
   ClientMsg,
@@ -13,8 +14,7 @@ import type {
   GridPos,
 } from '@ect/shared';
 import {
-  STARTING_HP,
-  STARTING_GOLD,
+  DEFAULT_GAME_CONFIG,
   STARTING_LEVEL,
   GRID_SIZE,
   SHOP_SLOTS,
@@ -30,8 +30,12 @@ import {
   BASE_TOWER_COSTS,
   UPGRADE_COST_T1,
   UPGRADE_COST_T2,
+  UPGRADE_COST_T3,
+  UPGRADE_POINTS_REQUIRED_T3,
   isPathCell,
   HEX_MAP,
+  canUpgradeTower,
+  getUpgradeCost,
 } from '@ect/shared';
 import { ShopManager } from './shop.js';
 import { CombatManager } from './combat.js';
@@ -51,7 +55,10 @@ export class Game {
   /** Track per-round leaks per player for clean bonus calculation */
   roundLeaks: Map<string, number> = new Map();
 
-  constructor(clients: Client[], names: Map<string, string>) {
+  config: GameConfig;
+
+  constructor(clients: Client[], names: Map<string, string>, config: GameConfig = DEFAULT_GAME_CONFIG) {
+    this.config = config;
     // Pick random map
     this.map = ALL_MAPS[Math.floor(Math.random() * ALL_MAPS.length)];
 
@@ -70,8 +77,8 @@ export class Game {
       id,
       name: names.get(id) || `Player ${i + 1}`,
       color: PLAYER_COLORS[i] as PlayerColor,
-      hp: STARTING_HP,
-      gold: STARTING_GOLD,
+      hp: config.startingHp,
+      gold: config.startingGold,
       level: STARTING_LEVEL,
       xp: 0,
       xpToNext: 0, // No longer used
@@ -95,7 +102,7 @@ export class Game {
       winner: null,
     };
 
-    this.shop = new ShopManager(this.state);
+    this.shop = new ShopManager(this.state, config.fragmentPoolSize);
     this.combat = new CombatManager(this.state, this.map);
     this.economy = new EconomyManager(this.state);
     // Don't start yet — wait for createGame to send GAME_START first
@@ -162,16 +169,17 @@ export class Game {
         const tower = player.towers.find((t) => t.instanceId === msg.instanceId);
         if (!tower) return;
 
-        // Check if tower already has 2 elements (max)
-        if (tower.appliedElements.length >= 2) return;
+        const check = canUpgradeTower(
+          tower.appliedElements,
+          msg.element,
+          player.fragments,
+          player.gold,
+          player.totalBought
+        );
+        if (!check.canUpgrade) return;
 
-        // Check if player has enough fragments in this element
-        if (player.fragments[msg.element] < 1) return;
-
-        // Check if element is already applied
-        if (tower.appliedElements.includes(msg.element)) return;
-
-        // Apply upgrade - free, just consume 1 fragment
+        // Deduct cost and fragment
+        player.gold -= check.cost;
         player.fragments[msg.element]--;
         tower.appliedElements.push(msg.element);
 
@@ -351,6 +359,7 @@ export class Game {
   }
 
   startCombat() {
+    if (this.state.phase === 'gameOver') return;
     this.state.phase = 'combat';
     this.broadcast({
       type: 'PHASE_CHANGE',
@@ -378,6 +387,7 @@ export class Game {
   }
 
   tick() {
+    if (this.state.phase === 'gameOver') return;
     this.tickCount++;
 
     // Update each alive player's mobs
@@ -471,6 +481,7 @@ export class Game {
   }
 
   endRound() {
+    if (this.state.phase === 'gameOver') return;
     // Calculate income
     this.state.players.filter((p) => p.alive).forEach((p) => {
       const leakCount = this.roundLeaks.get(p.id) || 0;
@@ -482,9 +493,10 @@ export class Game {
   }
 
   endGame() {
+    if (this.state.phase === 'gameOver') return; // prevent double-end
     this.state.phase = 'gameOver';
-    if (this.tickInterval) clearInterval(this.tickInterval);
-    if (this.phaseTimer) clearInterval(this.phaseTimer);
+    if (this.tickInterval) { clearInterval(this.tickInterval); this.tickInterval = null; }
+    if (this.phaseTimer) { clearInterval(this.phaseTimer); this.phaseTimer = null; }
 
     const alive = this.state.players.filter((p) => p.alive);
     const winner = alive.length > 0
@@ -499,13 +511,13 @@ export class Game {
       playerToGame.delete(playerId);
     });
 
-    // Remove from active games after delay to allow clients to process GAME_OVER
+    // Remove from active games + reset room so players can restart
     const roomCode = [...this.clients.values()][0]?.roomCode;
     if (roomCode) {
       setTimeout(() => {
         activeGames.delete(roomCode);
         console.log(`[cleanup] Removed game ${roomCode}`);
-      }, 1000);
+      }, 500);
     }
   }
 }
@@ -519,8 +531,8 @@ export function getGameForPlayer(playerId: string): Game | undefined {
   return playerToGame.get(playerId);
 }
 
-export function createGame(clients: Client[], names: Map<string, string>) {
-  const game = new Game(clients, names);
+export function createGame(clients: Client[], names: Map<string, string>, config?: GameConfig) {
+  const game = new Game(clients, names, config);
   // Store by first player's room code for lookup
   if (clients[0].roomCode) {
     activeGames.set(clients[0].roomCode, game);

@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import type { Client } from './index.js';
-import type { ClientMsg, ServerMsg, LobbyPlayer } from '@ect/shared';
-import { MAX_PLAYERS, MIN_PLAYERS, PLAYER_COLORS } from '@ect/shared';
+import type { ClientMsg, ServerMsg, LobbyPlayer, GameConfig } from '@ect/shared';
+import { MAX_PLAYERS, MIN_PLAYERS, PLAYER_COLORS, DEFAULT_GAME_CONFIG } from '@ect/shared';
 import { createGame, getGameForPlayer } from './game.js';
 
 interface Room {
@@ -10,6 +10,8 @@ interface Room {
   names: Map<string, string>;   // clientId → playerName
   ready: Set<string>;
   started: boolean;
+  hostId: string;               // first player to join is host
+  config: GameConfig;
 }
 
 const rooms = new Map<string, Room>();
@@ -61,8 +63,16 @@ function broadcastLobby(room: Room) {
     name: room.names.get(c.id) || 'Unknown',
     ready: room.ready.has(c.id),
   }));
-  const msg: ServerMsg = { type: 'LOBBY_UPDATE', players, roomCode: room.code };
-  room.clients.forEach((c) => send(c, msg));
+  room.clients.forEach((c) => {
+    const msg: ServerMsg = {
+      type: 'LOBBY_UPDATE',
+      players,
+      roomCode: room.code,
+      config: room.config,
+      isHost: c.id === room.hostId,
+    };
+    send(c, msg);
+  });
 }
 
 export function handleMessage(client: Client, msg: ClientMsg) {
@@ -104,6 +114,8 @@ export function handleMessage(client: Client, msg: ClientMsg) {
           names: new Map(),
           ready: new Set(),
           started: false,
+          hostId: client.id,
+          config: { ...DEFAULT_GAME_CONFIG },
         };
         rooms.set(code, room);
         console.log(`[room] Created ${code}`);
@@ -112,9 +124,28 @@ export function handleMessage(client: Client, msg: ClientMsg) {
       room.clients.push(client);
       room.names.set(client.id, msg.name || `Player ${room.clients.length}`);
       client.roomCode = room.code;
+      // If host left and rejoined or room has no host, assign
+      if (!room.hostId || !room.clients.find(c => c.id === room.hostId)) {
+        room.hostId = room.clients[0].id;
+      }
 
       // Tell client their ID
       send(client, { type: 'YOUR_ID', id: client.id });
+      broadcastLobby(room);
+      break;
+    }
+
+    case 'SET_CONFIG': {
+      if (!client.roomCode) return;
+      const room = rooms.get(client.roomCode);
+      if (!room || room.started) return;
+      // Only host can change config
+      if (client.id !== room.hostId) return;
+      // Merge partial config with validation
+      const c = msg.config;
+      if (c.startingGold !== undefined) room.config.startingGold = Math.max(0, Math.min(500, Math.round(c.startingGold)));
+      if (c.startingHp !== undefined) room.config.startingHp = Math.max(1, Math.min(500, Math.round(c.startingHp)));
+      if (c.fragmentPoolSize !== undefined) room.config.fragmentPoolSize = Math.max(1, Math.min(50, Math.round(c.fragmentPoolSize)));
       broadcastLobby(room);
       break;
     }
@@ -139,8 +170,8 @@ export function handleMessage(client: Client, msg: ClientMsg) {
         
       if (canStart) {
         room.started = true;
-        console.log(`[game] Starting in room ${room.code} with ${room.clients.length} players`);
-        createGame(room.clients, room.names);
+        console.log(`[game] Starting in room ${room.code} with ${room.clients.length} players, config:`, room.config);
+        createGame(room.clients, room.names, room.config);
       }
       break;
     }
