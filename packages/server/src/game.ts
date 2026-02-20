@@ -591,6 +591,12 @@ export class Game {
       this.endGame();
       return;
     }
+    if (this.state.players.length === 1 && alivePlayers.length === 0) {
+      // Solo: player died, game over
+      clearInterval(this.tickInterval!);
+      this.endGame();
+      return;
+    }
 
     if (allMobsDone) {
       clearInterval(this.tickInterval!);
@@ -658,6 +664,11 @@ export function createGame(clients: Client[], names: Map<string, string>) {
 
   // Send game start to each player with their ID
   clients.forEach((c) => {
+    // Ensure player knows their ID
+    game.sendTo(c.id, {
+      type: 'YOUR_ID',
+      id: c.id,
+    });
     game.sendTo(c.id, {
       type: 'GAME_START',
       state: game.state,
