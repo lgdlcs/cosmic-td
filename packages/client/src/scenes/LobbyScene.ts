@@ -67,16 +67,15 @@ export class LobbyScene extends Phaser.Scene {
       );
     }
 
-    // Connect & listen (only if not already connected)
-    const setupListeners = () => {
-      socket.onMessage((msg) => this.handleMsg(msg));
-    };
-
-    if (!socket.isConnected()) {
-      socket.connect().then(setupListeners);
-    } else {
-      setupListeners();
-    }
+    // Always fresh connection when entering lobby
+    socket.clearHandlers();
+    const handler = (msg: ServerMsg) => this.handleMsg(msg);
+    socket.reconnect().then(() => {
+      socket.onMessage(handler);
+    }).catch((e) => {
+      console.error('Failed to connect', e);
+      this.statusText.setText('❌ Cannot connect to server').setColor('#ff6b6b');
+    });
   }
 
   private handleMsg(msg: ServerMsg) {

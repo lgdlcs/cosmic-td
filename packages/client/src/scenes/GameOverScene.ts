@@ -49,11 +49,9 @@ export class GameOverScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true })
       .on('pointerdown', () => {
-        // Fresh connection for new game
         socket.clearHandlers();
-        socket.reconnect().then(() => {
-          this.scene.start('LobbyScene');
-        });
+        // Go to lobby — it will handle reconnection
+        this.scene.start('LobbyScene');
       });
   }
 }

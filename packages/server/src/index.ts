@@ -34,7 +34,7 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     console.log(`[disconnect] ${client.id}`);
     clients.delete(ws);
-    // TODO: handle disconnect in game
+    // Lobby cleanup is handled when they rejoin
   });
 });
 
