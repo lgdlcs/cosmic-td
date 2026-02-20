@@ -465,6 +465,132 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // ── Evolution Tree Overlay ─────────────────────────────
+
+  private evoTreeEl: HTMLDivElement | null = null;
+
+  private toggleEvoTree() {
+    if (this.evoTreeEl) {
+      this.evoTreeEl.remove();
+      this.evoTreeEl = null;
+      return;
+    }
+
+    const container = document.getElementById('game-container')!;
+    const panel = document.createElement('div');
+    panel.style.cssText = `
+      position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+      width:860px; max-height:620px; overflow-y:auto;
+      background:#0d0d1a; border:2px solid #ffd93d; border-radius:12px;
+      padding:20px; font-family:'Segoe UI',sans-serif; color:#eee; z-index:100;
+      font-size:13px; line-height:1.5;
+    `;
+
+    const SYMBOLS: Record<string, string> = { fire:'🔥', water:'💧', earth:'🌍', wind:'💨', light:'☀️', dark:'🌑' };
+    const COLORS: Record<string, string> = { fire:'#FF6B35', water:'#4EA8DE', earth:'#8B7355', wind:'#A8E6CF', light:'#FFD93D', dark:'#9B5DE5' };
+
+    // T2 combos
+    const t2: [string,string,string][] = [
+      ['fire+water','Steam','Burn + Slow'],['earth+fire','Magma','Burn + Power'],
+      ['fire+wind','Blaze','Burn + Speed'],['fire+light','Solar','Burn + Range'],
+      ['dark+fire','Hellfire','Burn + Poison'],['earth+water','Mud','Slow + Power'],
+      ['water+wind','Storm','Slow + Speed'],['light+water','Prism','Slow + Range'],
+      ['dark+water','Abyssal','Slow + Poison'],['earth+wind','Gale','Power + Speed'],
+      ['earth+light','Radiant','Power + Range'],['dark+earth','Shadow','Power + Poison'],
+      ['light+wind','Zephyr','Speed + Range'],['dark+wind','Phantom','Speed + Poison'],
+      ['dark+light','Eclipse','Range + Poison'],
+    ];
+    const t3: [string,string,string][] = [
+      ['earth+fire+water','Geyser','Burn+Slow+Power'],['fire+water+wind','Typhoon','Burn+Slow+Speed'],
+      ['fire+light+water','Aurora','Burn+Slow+Range'],['dark+fire+water','Voodoo','Burn+Slow+Poison'],
+      ['earth+fire+wind','Sandstorm','Burn+Power+Speed'],['earth+fire+light','Forge','Burn+Power+Range'],
+      ['dark+earth+fire','Infernal','Burn+Power+Poison'],['fire+light+wind','Phoenix','Burn+Speed+Range'],
+      ['dark+fire+wind','Wraith','Burn+Speed+Poison'],['dark+fire+light','Purgatory','Burn+Range+Poison'],
+      ['earth+water+wind','Monsoon','Slow+Power+Speed'],['earth+light+water','Crystal','Slow+Power+Range'],
+      ['dark+earth+water','Swamp','Slow+Power+Poison'],['light+water+wind','Rainbow','Slow+Speed+Range'],
+      ['dark+water+wind','Maelstrom','Slow+Speed+Poison'],['dark+light+water','Leviathan','Slow+Range+Poison'],
+      ['earth+light+wind','Titan','Power+Speed+Range'],['dark+earth+wind','Decay','Power+Speed+Poison'],
+      ['dark+earth+light','Obsidian','Power+Range+Poison'],['dark+light+wind','Specter','Speed+Range+Poison'],
+    ];
+
+    const elDots = (key: string) => key.split('+').map(e => 
+      `<span style="color:${COLORS[e]}">${SYMBOLS[e]}</span>`
+    ).join('');
+
+    const bases = [
+      { name:'Archer', emoji:'🏹', cost:3, desc:'Fast, single target' },
+      { name:'Cannon', emoji:'💣', cost:4, desc:'Slow AoE splash' },
+      { name:'Mage', emoji:'🔮', cost:5, desc:'Balanced, effects' },
+    ];
+
+    let html = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <span style="font-size:18px;font-weight:bold;color:#ffd93d">📖 Evolution Tree</span>
+        <span id="evo-close" style="cursor:pointer;font-size:20px;color:#888">✕</span>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:10px;font-size:11px;color:#888">
+        <span>T1 = 3g</span><span>•</span><span>T2 = 5g</span><span>•</span>
+        <span>T3 = 8g (need 2pts each)</span><span>•</span>
+        <span style="color:#ffd93d">126 unique towers</span>
+      </div>
+    `;
+
+    // Base towers
+    html += `<div style="display:flex;gap:12px;margin-bottom:14px">`;
+    bases.forEach(b => {
+      html += `<div style="flex:1;background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:16px">${b.emoji}</div>
+        <div style="font-weight:bold">${b.name}</div>
+        <div style="font-size:11px;color:#888">${b.cost}g — ${b.desc}</div>
+      </div>`;
+    });
+    html += `</div>`;
+
+    // T1
+    html += `<div style="font-weight:bold;color:#4a6;margin-bottom:6px">▸ T1 — Single Element (3g)</div>`;
+    html += `<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">`;
+    Object.entries(SYMBOLS).forEach(([el, sym]) => {
+      const eff: Record<string,string> = { fire:'Burn DoT', water:'Slow 25%', earth:'+40% DMG', wind:'+30% AS', light:'+1 Range', dark:'Poison DoT' };
+      html += `<div style="background:#1a1a2e;border:1px solid ${COLORS[el]};border-radius:6px;padding:4px 10px;font-size:12px">
+        ${sym} <b style="color:${COLORS[el]}">${el.charAt(0).toUpperCase()+el.slice(1)}</b> — ${eff[el]}
+      </div>`;
+    });
+    html += `</div>`;
+
+    // T2
+    html += `<div style="font-weight:bold;color:#c80;margin-bottom:6px">▸ T2 — Dual Element (5g) — 15 combos</div>`;
+    html += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:14px">`;
+    t2.forEach(([key, name, fx]) => {
+      html += `<div style="background:#1a1a2e;border:1px solid #333;border-radius:4px;padding:4px 8px;font-size:11px">
+        ${elDots(key)} <b style="color:#e0c060">${name}</b> <span style="color:#888">— ${fx}</span>
+      </div>`;
+    });
+    html += `</div>`;
+
+    // T3
+    html += `<div style="font-weight:bold;color:#f44;margin-bottom:6px">▸ T3 — Triple Element (8g) — 20 combos</div>`;
+    html += `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px;margin-bottom:10px">`;
+    t3.forEach(([key, name, fx]) => {
+      html += `<div style="background:#1a1a2e;border:1px solid #444;border-radius:4px;padding:4px 8px;font-size:11px">
+        ${elDots(key)} <b style="color:#ff8844">${name}</b> <span style="color:#888">— ${fx}</span>
+      </div>`;
+    });
+    html += `</div>`;
+
+    // Element points reminder
+    html += `<div style="background:#111;border:1px dashed #333;border-radius:6px;padding:8px;font-size:11px;color:#aaa">
+      <b style="color:#ffd93d">💡 Element Points:</b> +1 free/round (your choice) or buy crystals in shop (4g).
+      Points scale ALL towers with that element: 2pts = +15% DMG, 3pts = +30% DMG.
+      T3 requires 2+ points in each of the 3 elements.
+    </div>`;
+
+    panel.innerHTML = html;
+    container.appendChild(panel);
+    this.evoTreeEl = panel;
+
+    panel.querySelector('#evo-close')!.addEventListener('click', () => this.toggleEvoTree());
+  }
+
   private updateSpeedButtons() {
     const speeds = [1, 2, 3, 5, 10];
     this.speedButtons.forEach((btn, i) => {
@@ -491,6 +617,7 @@ export class GameScene extends Phaser.Scene {
     if (this.timerEvent) this.timerEvent.destroy();
     if (this.elementChoiceOverlay) this.elementChoiceOverlay.destroy();
     if (this.upgradeMenu) this.upgradeMenu.destroy();
+    if (this.evoTreeEl) { this.evoTreeEl.remove(); this.evoTreeEl = null; }
   }
 
   update(_time: number, delta: number) {
@@ -1246,6 +1373,12 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(1, 0).setDepth(5);
 
     // Mute button (top right corner)
+    // Evolution tree button
+    const treeBtn = this.add.text(GRID_X + GRID_PX - 60, 8, '📖', {
+      fontSize: '20px',
+    }).setOrigin(1, 0).setDepth(5).setInteractive({ useHandCursor: true });
+    treeBtn.on('pointerdown', () => this.toggleEvoTree());
+
     const muteBtn = this.add.text(GRID_X + GRID_PX, 8, sfx.muted ? '🔇' : '🔊', {
       fontSize: '20px',
     }).setOrigin(1, 0).setDepth(5).setInteractive({ useHandCursor: true });
