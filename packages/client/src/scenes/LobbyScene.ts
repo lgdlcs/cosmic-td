@@ -68,14 +68,19 @@ export class LobbyScene extends Phaser.Scene {
     });
   }
 
+  private myId: string = '';
+
   private handleMsg(msg: ServerMsg) {
     switch (msg.type) {
+      case 'YOUR_ID':
+        this.myId = msg.id;
+        break;
       case 'LOBBY_UPDATE':
         this.roomCodeText.setText(`Room: ${msg.roomCode}`);
         this.updatePlayerList(msg.players);
         break;
       case 'GAME_START':
-        this.scene.start('GameScene', { state: msg.state, mapDef: msg.mapDef });
+        this.scene.start('GameScene', { state: msg.state, mapDef: msg.mapDef, myId: this.myId });
         break;
       case 'ERROR':
         this.statusText.setText(`❌ ${msg.message}`).setColor('#ff6b6b');

@@ -47,15 +47,13 @@ export class GameScene extends Phaser.Scene {
     super({ key: 'GameScene' });
   }
 
-  init(data: { state: GameState; mapDef: GameMap }) {
+  init(data: { state: GameState; mapDef: GameMap; myId: string }) {
     this.gameState = data.state;
     this.mapDef = data.mapDef;
+    this.myId = data.myId;
   }
 
   create() {
-    // Figure out our player ID (first player matching our socket — simplified)
-    // In production, server would send our ID. For now, use first player.
-    this.myId = this.gameState.players[0]?.id || '';
 
     this.gridGraphics = this.add.graphics();
     this.mobGraphics = this.add.graphics();

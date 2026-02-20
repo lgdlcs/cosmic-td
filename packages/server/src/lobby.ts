@@ -2,7 +2,7 @@ import { nanoid } from 'nanoid';
 import type { Client } from './index.js';
 import type { ClientMsg, ServerMsg, LobbyPlayer } from '@ect/shared';
 import { MAX_PLAYERS, MIN_PLAYERS, PLAYER_COLORS } from '@ect/shared';
-import { createGame } from './game.js';
+import { createGame, getGameForPlayer } from './game.js';
 
 interface Room {
   code: string;
@@ -73,6 +73,8 @@ export function handleMessage(client: Client, msg: ClientMsg) {
       room.names.set(client.id, msg.name || `Player ${room.clients.length}`);
       client.roomCode = room.code;
 
+      // Tell client their ID
+      send(client, { type: 'YOUR_ID', id: client.id });
       broadcastLobby(room);
       break;
     }
@@ -103,8 +105,11 @@ export function handleMessage(client: Client, msg: ClientMsg) {
     }
 
     default: {
-      // Forward game messages to the game instance
-      // TODO: route to active game
+      // Forward game messages to the active game
+      const game = getGameForPlayer(client.id);
+      if (game) {
+        game.handlePlayerAction(client.id, msg);
+      }
       break;
     }
   }

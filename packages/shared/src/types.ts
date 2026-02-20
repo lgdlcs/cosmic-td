@@ -156,6 +156,7 @@ export type ClientMsg =
 
 // Server → Client
 export type ServerMsg =
+  | { type: 'YOUR_ID'; id: string }
   | { type: 'LOBBY_UPDATE'; players: LobbyPlayer[]; roomCode: string }
   | { type: 'GAME_START'; state: GameState; mapDef: GameMap }
   | { type: 'PHASE_CHANGE'; phase: GamePhase; round: number; timer: number }

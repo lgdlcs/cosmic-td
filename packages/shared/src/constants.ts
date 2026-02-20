@@ -4,7 +4,7 @@ import type { Element } from './types.js';
 
 export const GRID_SIZE = 8;
 export const MAX_PLAYERS = 4;
-export const MIN_PLAYERS = 2;
+export const MIN_PLAYERS = 1; // dev mode, set to 2 for production
 export const STARTING_HP = 100;
 export const STARTING_GOLD = 10;
 export const STARTING_LEVEL = 1;
