@@ -18,6 +18,52 @@ import {
   isPathCell,
 } from '@ect/shared';
 
+// ── Procedural Sound Effects (Web Audio API) ───────────
+
+class SoundFX {
+  private ctx: AudioContext | null = null;
+
+  private getCtx(): AudioContext | null {
+    if (!this.ctx) {
+      try { this.ctx = new AudioContext(); } catch { return null; }
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+    return this.ctx;
+  }
+
+  private tone(freq: number, duration: number, type: OscillatorType = 'square', volume = 0.15) {
+    const ctx = this.getCtx();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(volume, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + duration);
+  }
+
+  towerPlace() { this.tone(120, 0.15, 'triangle', 0.2); this.tone(80, 0.1, 'square', 0.1); }
+  
+  towerShoot(element: string) {
+    const freqs: Record<string, number> = { fire: 300, water: 500, earth: 150, wind: 700, light: 900, dark: 200 };
+    const types: Record<string, OscillatorType> = { fire: 'sawtooth', water: 'sine', earth: 'square', wind: 'triangle', light: 'sine', dark: 'sawtooth' };
+    this.tone(freqs[element] || 400, 0.08, types[element] || 'square', 0.08);
+  }
+
+  mobDeath() { this.tone(200, 0.1, 'square', 0.12); this.tone(100, 0.15, 'sawtooth', 0.1); }
+  
+  waveStart() { this.tone(440, 0.15, 'square', 0.15); setTimeout(() => this.tone(660, 0.2, 'square', 0.15), 150); }
+  
+  goldReceived() { this.tone(1200, 0.06, 'sine', 0.1); setTimeout(() => this.tone(1600, 0.06, 'sine', 0.1), 60); }
+  
+  leak() { this.tone(150, 0.3, 'sawtooth', 0.2); }
+}
+
+const sfx = new SoundFX();
+
 const CELL = 64;
 const GRID_X = 210;
 const GRID_Y = 50;
@@ -91,6 +137,9 @@ export class GameScene extends Phaser.Scene {
   private gridHover: GridHover | null = null;
   private hoveredTower: string | null = null; // instanceId of hovered tower
 
+  // Opponent mini-view graphics
+  private miniGfx!: Phaser.GameObjects.Graphics;
+
   // UI
   private uiTopLeft!: Phaser.GameObjects.Text;
   private uiTopRight!: Phaser.GameObjects.Text;
@@ -125,6 +174,7 @@ export class GameScene extends Phaser.Scene {
     this.towerGfx = this.add.graphics().setDepth(1);
     this.mobGfx = this.add.graphics().setDepth(2);
     this.fxGfx = this.add.graphics().setDepth(3);
+    this.miniGfx = this.add.graphics().setDepth(4);
 
     this.projectiles = [];
     this.deathEffects = [];
@@ -175,6 +225,7 @@ export class GameScene extends Phaser.Scene {
     this.drawMobs();
     this.drawGridPreview();
     this.drawFX();
+    this.drawOpponentMiniViews();
 
     // Update mob count during combat
     if (this.gameState.phase === 'combat') {
@@ -202,6 +253,7 @@ export class GameScene extends Phaser.Scene {
         // Phase announcement flash
         if (msg.phase === 'combat') {
           this.showPhaseFlash('⚔️ COMBAT');
+          sfx.waveStart();
         } else if (msg.phase === 'shopping') {
           this.showPhaseFlash(`🛒 ROUND ${msg.round}`);
         }
@@ -250,6 +302,11 @@ export class GameScene extends Phaser.Scene {
   // ── Combat Events → Visual Effects ────────────────────
 
   private onCombatEvents(attacks: CombatAttack[], kills: string[], leaks: string[]) {
+    // Play shoot sounds (throttled — max 3 per batch)
+    for (const atk of attacks.slice(0, 3)) {
+      sfx.towerShoot(atk.element);
+    }
+
     // Spawn projectiles
     for (const atk of attacks) {
       const sx = GRID_X + atk.towerX * CELL + CELL / 2;
@@ -281,7 +338,9 @@ export class GameScene extends Phaser.Scene {
       // (we don't have towerId mapped to position here, so flash is implicit via projectile origin)
     }
 
-    // Death effects for killed mobs
+    // Death effects + sounds for killed mobs
+    if (kills.length > 0) sfx.mobDeath();
+    if (kills.length > 0) sfx.goldReceived();
     for (const mobId of kills) {
       const mob = (this.gameState.mobs[this.myId] || []).find((m) => m.instanceId === mobId);
       if (mob) {
@@ -307,6 +366,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Leak effects
+    if (leaks.length > 0) sfx.leak();
     for (const mobId of leaks) {
       const exit = this.mapDef.exit;
       const ex = GRID_X + exit.col * CELL + CELL / 2;
@@ -409,12 +469,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateTowerHover(ptr: Phaser.Input.Pointer) {
-    if (this.gameState.phase !== 'shopping') {
-      this.hoveredTower = null;
-      this.uiTowerHoverInfo.setText('');
-      return;
-    }
-
     const col = Math.floor((ptr.x - GRID_X) / CELL);
     const row = Math.floor((ptr.y - GRID_Y) / CELL);
     
@@ -426,8 +480,12 @@ export class GameScene extends Phaser.Scene {
         this.hoveredTower = tower.instanceId;
         const def = TOWER_MAP[tower.defId];
         if (def) {
-          const sellPrice = Math.floor(def.cost * 0.6); // 60% sell value
-          this.uiTowerHoverInfo.setText(`💰 Sell for ${sellPrice}g`);
+          const elems = def.elements.map(e => ELEMENT_SYMBOLS[e]).join('');
+          const starLabel = tower.starLevel > 0 ? ` ★${tower.starLevel}` : '';
+          const sellPrice = Math.floor(def.cost * 0.7);
+          const info = `${elems} ${def.name}${starLabel}  |  DMG: ${def.damage}  SPD: ${def.attackSpeed}  RNG: ${def.range}`;
+          const sellInfo = this.gameState.phase === 'shopping' ? `  |  💰 Sell ${sellPrice}g` : '';
+          this.uiTowerHoverInfo.setText(info + sellInfo);
         }
       } else {
         this.hoveredTower = null;
@@ -685,9 +743,17 @@ export class GameScene extends Phaser.Scene {
 
       const size = 20;
 
-      // Range circle (very subtle)
-      this.towerGfx.lineStyle(1, elemColor, 0.08);
-      this.towerGfx.strokeCircle(cx, cy, def.range * CELL);
+      // Range circle — prominent when hovered, subtle otherwise
+      const isHovered = this.hoveredTower === tower.instanceId;
+      if (isHovered) {
+        this.towerGfx.fillStyle(elemColor, 0.08);
+        this.towerGfx.fillCircle(cx, cy, def.range * CELL);
+        this.towerGfx.lineStyle(2, elemColor, 0.5);
+        this.towerGfx.strokeCircle(cx, cy, def.range * CELL);
+      } else {
+        this.towerGfx.lineStyle(1, elemColor, 0.08);
+        this.towerGfx.strokeCircle(cx, cy, def.range * CELL);
+      }
 
       // Base platform
       this.towerGfx.fillStyle(0x111122, 0.6);
@@ -986,8 +1052,9 @@ export class GameScene extends Phaser.Scene {
     const me = this.me();
     const streak = me?.streak || 0;
     const phase = this.gameState.phase === 'shopping' ? '🛒 SHOP' : '⚔️ COMBAT';
-    const timer = this.localTimer > 0 ? `⏱${this.localTimer}s` : '';
-    this.uiTopRight.setText(`R${this.gameState.round}/30  ${phase}  ${timer}  🔥${streak}`);
+    const timer = this.localTimer > 0 ? `⏱ ${this.localTimer}s` : '';
+    const streakText = streak > 0 ? `  🔥×${streak}` : '';
+    this.uiTopRight.setText(`📍 Round ${this.gameState.round}/30  ${phase}  ${timer}${streakText}`);
   }
 
   // ── Actions ───────────────────────────────────────────
@@ -1018,6 +1085,7 @@ export class GameScene extends Phaser.Scene {
       benchIndex: this.selectedBenchIndex, 
       position: pos 
     });
+    sfx.towerPlace();
     
     // Deselect after placement
     this.selectedBenchIndex = -1;
@@ -1031,6 +1099,52 @@ export class GameScene extends Phaser.Scene {
     
     this.selectedBenchIndex = this.selectedBenchIndex === index ? -1 : index;
     this.updateUI();
+  }
+
+  // ── Opponent Mini-View ─────────────────────────────────
+
+  private drawOpponentMiniViews() {
+    this.miniGfx.clear();
+    const opponents = this.gameState.players.filter(p => p.id !== this.myId && p.alive);
+    const miniCell = 6;
+    const miniSize = miniCell * GRID_SIZE; // 48px
+
+    opponents.forEach((opp, idx) => {
+      const baseX = GRID_X + GRID_PX + 20;
+      const baseY = GRID_Y + idx * (miniSize + 50);
+
+      // Background
+      this.miniGfx.fillStyle(0x0a0a1e, 0.8);
+      this.miniGfx.fillRect(baseX - 2, baseY - 2, miniSize + 4, miniSize + 4);
+      this.miniGfx.lineStyle(1, Phaser.Display.Color.HexStringToColor(PLAYER_COLOR_HEX[opp.color]).color, 0.6);
+      this.miniGfx.strokeRect(baseX - 2, baseY - 2, miniSize + 4, miniSize + 4);
+
+      // Draw path cells
+      for (const cell of this.mapDef.path) {
+        this.miniGfx.fillStyle(0x2a2a4a, 0.5);
+        this.miniGfx.fillRect(baseX + cell.col * miniCell, baseY + cell.row * miniCell, miniCell, miniCell);
+      }
+
+      // Draw towers
+      for (const tower of opp.towers) {
+        const elemColor = Phaser.Display.Color.HexStringToColor(
+          ELEMENT_COLORS[tower.elements[0] || 'fire']
+        ).color;
+        this.miniGfx.fillStyle(elemColor, 0.9);
+        this.miniGfx.fillRect(
+          baseX + tower.position.col * miniCell + 1,
+          baseY + tower.position.row * miniCell + 1,
+          miniCell - 2, miniCell - 2
+        );
+      }
+
+      // Draw mobs as tiny dots
+      const oppMobs = this.gameState.mobs[opp.id] || [];
+      for (const mob of oppMobs) {
+        this.miniGfx.fillStyle(0xff4444, 0.8);
+        this.miniGfx.fillCircle(baseX + mob.x * miniCell + miniCell / 2, baseY + mob.y * miniCell + miniCell / 2, 2);
+      }
+    });
   }
 
   private me(): PlayerState | undefined {
