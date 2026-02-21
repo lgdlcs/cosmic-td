@@ -31,7 +31,9 @@ import {
   generateAugmentChoices,
   AUGMENT_POOL,
   randomElement,
+  getActiveCombo,
 } from '@ect/shared';
+import type { TowerTier } from '@ect/shared';
 import { ShopManager } from './shop.js';
 import { CombatManager } from './combat.js';
 import { EconomyManager } from './economy.js';
@@ -140,8 +142,9 @@ export class Game {
         player.gold -= cost;
         player.shop[msg.shopIndex] = null;
 
-        // Try fusion: 3 of same type → ★
+        // Try fusion (legacy, now no-op) and update upgrade indicators
         this.shop.tryFusion(player, itemId);
+        this.shop.updateCanUpgrade(player);
 
         this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
         this.broadcastStateUpdate();
@@ -158,6 +161,18 @@ export class Game {
         
         if (this.shop.reroll(player)) {
           this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
+        }
+        break;
+      }
+      case 'UPGRADE_TOWER': {
+        if (this.state.phase !== 'shopping') return;
+        if (this.shop.upgradeTower(player, msg.towerId)) {
+          const tower = player.towers.find(t => t.instanceId === msg.towerId);
+          if (tower) {
+            this.broadcast({ type: 'TOWER_UPGRADED', playerId, towerId: msg.towerId, newTier: tower.stars });
+          }
+          this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
+          this.broadcastStateUpdate();
         }
         break;
       }
@@ -183,6 +198,13 @@ export class Game {
             if (def && (def.towerType === 'arrow' || def.towerType === 'cannon')) {
               tower.element = activeElement;
             }
+          }
+          
+          // Check for combo unlock
+          const combo = getActiveCombo(player.elements);
+          if (combo) {
+            player.activeCombo = combo.id;
+            this.broadcast({ type: 'COMBO_UNLOCKED', playerId, comboId: combo.id, comboName: combo.name, comboColor: combo.color });
           }
         }
         
@@ -358,6 +380,11 @@ export class Game {
                   tower.element = aug.effect.element;
                 }
               }
+              const combo = getActiveCombo(p.elements);
+              if (combo) {
+                p.activeCombo = combo.id;
+                this.broadcast({ type: 'COMBO_UNLOCKED', playerId: p.id, comboId: combo.id, comboName: combo.name, comboColor: combo.color });
+              }
             }
             this.broadcast({ type: 'AUGMENT_PICKED', playerId: p.id, augmentId: randomPick });
           }
@@ -374,9 +401,10 @@ export class Game {
     const duration = this.state.round === 1 ? FIRST_SHOP_PHASE_DURATION : SHOP_PHASE_DURATION;
     this.state.timer = duration;
 
-    // Generate shops
+    // Generate shops and compute upgrade indicators
     this.state.players.filter((p) => p.alive).forEach((p) => {
       p.shop = this.shop.generateShop(p);
+      this.shop.updateCanUpgrade(p);
     });
 
     this.broadcast({
@@ -427,7 +455,7 @@ export class Game {
         if (!def) continue;
         
         const mobPower = def.mobPower || 1.0;
-        const starMult = pvpTower.stars >= 1 ? 2 : 1;
+        const starMult = pvpTower.stars >= 3 ? 3 : pvpTower.stars >= 2 ? 2 : 1;
         const pvpMultiplier = p.augments.includes('PVP_BOOST') ? 1.25 : 1;
         const doubleCount = p.augments.includes('DOUBLE_SEND') ? 2 : 1;
         

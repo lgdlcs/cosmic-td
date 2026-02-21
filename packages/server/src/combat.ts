@@ -26,7 +26,9 @@ import {
   getElementMultiplier,
   getEffectiveness,
   randomElement,
+  COMBO_MAP,
 } from '@ect/shared';
+import type { ComboEffectType } from '@ect/shared';
 
 export interface AttackEvent {
   towerId: string;
@@ -72,6 +74,12 @@ interface NatureTurret {
 /** Track consecutive hits for Light Arrow */
 type ConsecutiveHits = Map<string, Map<string, number>>; // towerId → mobId → count
 
+/** Track attack counts per tower for combo effects like Supernova */
+type AttackCounts = Map<string, number>; // towerId → count
+
+/** Track combo slow stacks per mob for Cryogenics */
+type SlowStacks = Map<string, number>; // mobId → stack count
+
 export class CombatManager {
   state: GameState;
   map: GameMap;
@@ -82,6 +90,10 @@ export class CombatManager {
   natureTurrets: Map<string, NatureTurret[]> = new Map();
   /** Light arrow consecutive hit tracking */
   consecutiveHits: ConsecutiveHits = new Map();
+  /** Tower attack counts for combo effects */
+  attackCounts: AttackCounts = new Map();
+  /** Cryogenics slow stacks */
+  slowStacks: SlowStacks = new Map();
 
   constructor(state: GameState, map: GameMap) {
     this.state = state;
@@ -237,6 +249,8 @@ export class CombatManager {
     this.setupZones(player);
     this.natureTurrets.set(player.id, []);
     this.consecutiveHits.clear();
+    this.attackCounts.clear();
+    this.slowStacks.clear();
 
     return mobs;
   }
@@ -395,6 +409,162 @@ export class CombatManager {
     }
   }
 
+  /** Apply combo effects from a tower attack */
+  private applyComboEffects(
+    player: PlayerState,
+    tower: { defId: string; instanceId: string },
+    target: MobInstance,
+    damage: number,
+    remaining: MobInstance[],
+  ) {
+    if (!player.activeCombo) return;
+    const combo = COMBO_MAP[player.activeCombo];
+    if (!combo) return;
+
+    const eff = combo.effect;
+
+    switch (eff.type) {
+      case 'dot_slow': {
+        // PLASMA: DoT + slow
+        target.effects.push({ type: 'burn', remaining: 2000, value: eff.value });
+        target.effects.push({ type: 'slow', remaining: 1500, value: eff.value2 || 0.2 });
+        break;
+      }
+      case 'impact_zone': {
+        // METEOR: burn zone around impact
+        const radius = eff.value2 || 1.5;
+        for (const m of remaining) {
+          const dx = m.x - target.x;
+          const dy = m.y - target.y;
+          if (Math.sqrt(dx * dx + dy * dy) <= radius) {
+            m.effects.push({ type: 'burn', remaining: 2000, value: eff.value });
+          }
+        }
+        break;
+      }
+      case 'drain_speed': {
+        // ECLIPSE: slow mob, gain damage bonus (handled via slow effect)
+        target.effects.push({ type: 'slow', remaining: 2000, value: eff.value });
+        break;
+      }
+      case 'aoe_burst': {
+        // SUPERNOVA: every 5th attack = AoE burst
+        const count = (this.attackCounts.get(tower.instanceId) || 0) + 1;
+        this.attackCounts.set(tower.instanceId, count);
+        if (count % 5 === 0) {
+          const radius = eff.value2 || 2;
+          const burstDmg = damage * (eff.value || 3);
+          for (const m of remaining) {
+            const dx = m.x - target.x;
+            const dy = m.y - target.y;
+            if (Math.sqrt(dx * dx + dy * dy) <= radius) {
+              m.hp -= burstDmg;
+            }
+          }
+        }
+        break;
+      }
+      case 'reduce_maxhp': {
+        // RADIATION: reduce max HP
+        const reduction = target.maxHp * (eff.value || 0.03);
+        target.maxHp = Math.max(1, target.maxHp - reduction);
+        if (target.hp > target.maxHp) target.hp = target.maxHp;
+        break;
+      }
+      case 'passive_aura': {
+        // CORONA: handled in tick as passive aura (below)
+        break;
+      }
+      case 'shatter': {
+        // COMET: splash to nearby
+        const radius = eff.value2 || 1.5;
+        const shatterDmg = damage * (eff.value || 0.4);
+        for (const m of remaining) {
+          if (m === target) continue;
+          const dx = m.x - target.x;
+          const dy = m.y - target.y;
+          if (Math.sqrt(dx * dx + dy * dy) <= radius) {
+            m.hp -= shatterDmg;
+          }
+        }
+        break;
+      }
+      case 'full_freeze': {
+        // ABSOLUTE_ZERO: chance to freeze
+        if (Math.random() < (eff.value || 0.12)) {
+          target.effects.push({ type: 'freeze', remaining: eff.value2 || 1000, value: 1 });
+        }
+        break;
+      }
+      case 'split_beam': {
+        // PRISM: hit additional targets
+        const beamDmg = damage * (eff.value2 || 0.4);
+        const nearby = remaining.filter(m => {
+          if (m === target) return false;
+          const dx = m.x - target.x;
+          const dy = m.y - target.y;
+          return Math.sqrt(dx * dx + dy * dy) <= 2.5;
+        }).slice(0, (eff.value || 3) - 1);
+        for (const m of nearby) m.hp -= beamDmg;
+        break;
+      }
+      case 'stack_freeze': {
+        // CRYOGENICS: slow stacks → freeze
+        target.effects.push({ type: 'slow', remaining: 2000, value: 0.15 });
+        const stacks = (this.slowStacks.get(target.instanceId) || 0) + 1;
+        this.slowStacks.set(target.instanceId, stacks);
+        if (stacks >= (eff.value || 3)) {
+          target.effects.push({ type: 'freeze', remaining: eff.value2 || 1500, value: 1 });
+          this.slowStacks.set(target.instanceId, 0);
+        }
+        break;
+      }
+      case 'gravity_pull': {
+        // BLACK_HOLE: slow
+        target.effects.push({ type: 'slow', remaining: 1500, value: eff.value2 || 0.25 });
+        break;
+      }
+      case 'ramp_damage': {
+        // CRYSTAL: consecutive hit bonus (already handled via photon cascade logic)
+        break;
+      }
+      case 'percent_hp': {
+        // ANTIMATTER: % max HP bonus damage
+        target.hp -= target.maxHp * (eff.value || 0.03);
+        break;
+      }
+      case 'chain_damage': {
+        // PARASITE: chain to nearby
+        const chainDmg = damage * (eff.value || 0.3);
+        const radius = eff.value2 || 2;
+        const nearby = remaining.filter(m => {
+          if (m === target) return false;
+          const dx = m.x - target.x;
+          const dy = m.y - target.y;
+          return Math.sqrt(dx * dx + dy * dy) <= radius;
+        });
+        if (nearby.length > 0) nearby[0].hp -= chainDmg;
+        break;
+      }
+      case 'ignore_armor': {
+        // DARK_MATTER: armor ignore is passive, handled in damage calc
+        break;
+      }
+      case 'cycle_element': {
+        // AURORA: always deals strong damage (handled in damage calc via override)
+        break;
+      }
+      case 'stacking_dot': {
+        // SPORE_CLOUD: stacking DoT
+        const stacks = target.effects.filter(e => e.type === 'poison').length;
+        const dps = (eff.value || 2) + stacks * (eff.value2 || 0.5);
+        target.effects.push({ type: 'poison', remaining: 3000, value: dps });
+        break;
+      }
+      // frost_zone, death_trap, aoe_slow, heal_towers handled elsewhere or as passive
+    }
+  }
+
   /** Process one tick of combat for a player */
   tick(player: PlayerState, mobs: MobInstance[], dtMs: number): TickResult {
     const killed: MobInstance[] = [];
@@ -479,6 +649,22 @@ export class CombatManager {
         }
       }
 
+      // CORONA combo: passive aura damage from towers
+      if (player.activeCombo) {
+        const comboCheck = COMBO_MAP[player.activeCombo];
+        if (comboCheck?.effect.type === 'passive_aura') {
+          for (const tower of player.towers) {
+            const tDef = TOWER_MAP[tower.defId];
+            if (!tDef || (tDef.towerType !== 'arrow' && tDef.towerType !== 'cannon')) continue;
+            const dx = mob.x - tower.position.col;
+            const dy = mob.y - tower.position.row;
+            if (Math.sqrt(dx * dx + dy * dy) <= (comboCheck.effect.value2 || 2)) {
+              mob.hp -= (comboCheck.effect.value || 3) * dt;
+            }
+          }
+        }
+      }
+
       if (mob.hp <= 0) {
         killed.push(mob);
       } else {
@@ -541,12 +727,15 @@ export class CombatManager {
       // Calculate damage with element multiplier
       let finalDamage = towerStats.damage;
       
-      // Element multiplier
-      const elemMult = getElementMultiplier(playerElement, target.element);
+      // Element multiplier (AURORA combo always hits strong)
+      const activeCombo = player.activeCombo ? COMBO_MAP[player.activeCombo] : undefined;
+      const isAurora = activeCombo?.effect.type === 'cycle_element';
+      const elemMult = isAurora ? 2.0 : getElementMultiplier(playerElement, target.element);
       finalDamage *= elemMult;
 
-      // Armor reduction from dark cannon
-      const armorReduce = target.effects
+      // Armor reduction from dark cannon (DARK_MATTER ignores armor)
+      const isDarkMatter = activeCombo?.effect.type === 'ignore_armor';
+      const armorReduce = isDarkMatter ? 0 : target.effects
         .filter(e => e.type === 'armorReduce')
         .reduce((sum, e) => sum + e.value, 0);
       if (armorReduce > 0) {
@@ -583,6 +772,9 @@ export class CombatManager {
 
       // Apply elemental effects
       this.applyElementalEffects(tower, target, playerElement, elemTier, finalDamage, remaining, player);
+
+      // Apply combo effects
+      this.applyComboEffects(player, tower, target, finalDamage, remaining);
 
       // Set cooldown
       if (towerStats.attackSpeed > 0) {

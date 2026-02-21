@@ -24,8 +24,12 @@ import {
   ELEMENT_COLOR,
   ELEMENT_COLOR_HEX,
   getEffectiveness,
+  COMBO_DEFS,
+  COMBO_MAP,
+  getActiveCombo,
 } from '@ect/shared';
-import type { Element } from '@ect/shared';
+import type { Element, TowerTier } from '@ect/shared';
+import type { ElementCombo } from '@ect/shared';
 
 // ── Procedural Sound Effects (Web Audio API) ───────────
 
@@ -85,6 +89,14 @@ const CELL = 32;
 const GRID_X = 224;
 const GRID_Y = 80;
 const GRID_PX = CELL * GRID_SIZE;
+
+// Tower shop display colors (Feature 2)
+const SHOP_TOWER_COLORS: Record<string, string> = {
+  arrow: '#00d4ff',   // Blaster: cyan
+  cannon: '#ff6b00',  // Railgun: red-orange
+  income: '#ffc107',  // Mining Probe: gold
+  pvp: '#7b2fbe',     // Warp Gate: purple
+};
 
 // ── Visual effect structs ───────────────────────────────
 
@@ -152,6 +164,18 @@ export class GameScene extends Phaser.Scene {
   // Augment pick overlay
   private augmentOverlay: Phaser.GameObjects.Container | null = null;
   private augmentChoices: { id: string; name: string; description: string; icon: string; tier: number }[] = [];
+
+  // Tech tree overlay
+  private techTreeOverlay: Phaser.GameObjects.Container | null = null;
+  private techTreeVisible = false;
+
+  // Upgrade UI
+  private upgradeButton: Phaser.GameObjects.Text | null = null;
+  private selectedTowerForUpgrade: string | null = null;
+
+  // Shop slot graphics for colored squares
+  private shopSlotGraphics: Phaser.GameObjects.Graphics | null = null;
+  private shopSlotGlowTimers: number[] = [0, 0, 0, 0, 0];
 
   // UI
   private uiTopLeft!: Phaser.GameObjects.Text;
@@ -326,6 +350,28 @@ export class GameScene extends Phaser.Scene {
           sfx.augmentPick();
         }
         break;
+
+      case 'TOWER_UPGRADED': {
+        if (msg.playerId === this.myId) {
+          // Upgrade animation
+          const me = this.me();
+          const tower = me?.towers.find(t => t.instanceId === msg.towerId);
+          if (tower) {
+            const cx = GRID_X + tower.position.col * CELL + CELL / 2;
+            const cy = GRID_Y + tower.position.row * CELL + CELL / 2;
+            this.showUpgradeAnimation(cx, cy, msg.newTier);
+          }
+          this.hideUpgradeButton();
+        }
+        break;
+      }
+
+      case 'COMBO_UNLOCKED': {
+        if (msg.playerId === this.myId) {
+          this.showComboUnlockAnimation(msg.comboName, msg.comboColor);
+        }
+        break;
+      }
 
       case 'SPEED_CHANGE':
         this.currentSpeed = msg.speed;
@@ -601,11 +647,16 @@ export class GameScene extends Phaser.Scene {
           const activeElement = me.elements && me.elements.length > 0 ? me.elements[me.elements.length - 1] as Element : undefined;
           const stats = getTowerStats(def, tower.stars, me.augments, activeElement, elemTier);
 
-          let info = `${stats.displayName}\n`;
+          const tierLabel = tower.stars >= 3 ? ' [T3]' : tower.stars >= 2 ? ' [T2]' : ' [T1]';
+          let info = `${stats.displayName}${tierLabel}\n`;
           info += `${def.description}\n`;
           if (tower.element) {
-            const emoji = ELEMENT_EMOJI[tower.element as Element] || '';
-            info += `Element: ${emoji} ${tower.element}\n`;
+            info += `Element: ${tower.element}\n`;
+          }
+          const meForCombo = this.me();
+          if (meForCombo?.activeCombo) {
+            const combo = COMBO_MAP[meForCombo.activeCombo];
+            if (combo) info += `Combo: ${combo.name}\n`;
           }
           if (stats.damage > 0) info += `DMG: ${stats.damage}  ATK SPD: ${stats.attackSpeed}/s  RANGE: ${stats.range}\n`;
           if (stats.splashRadius) info += `Splash: ${stats.splashRadius}\n`;
@@ -613,8 +664,13 @@ export class GameScene extends Phaser.Scene {
           if (stats.mobPower) info += `PvP Power: ${stats.mobPower}\n`;
 
           if (this.gameState.phase === 'shopping') {
-            const sellPrice = Math.floor((tower.stars >= 1 ? def.cost * 3 : def.cost) * 0.7);
-            info += `\n💰 Click to sell (${sellPrice}g)`;
+            if (tower.canUpgrade) {
+              info += `\n⬆ Click to UPGRADE`;
+            } else {
+              const copies = tower.stars >= 3 ? 9 : tower.stars >= 2 ? 3 : 1;
+              const sellPrice = Math.floor(def.cost * copies * 0.7);
+              info += `\nClick to sell (${sellPrice}g)`;
+            }
           }
 
           this.uiTowerHoverInfo.setText(info).setVisible(true);
@@ -864,7 +920,12 @@ export class GameScene extends Phaser.Scene {
 
       const cx = GRID_X + tower.position.col * CELL + CELL / 2;
       const cy = GRID_Y + tower.position.row * CELL + CELL / 2;
-      const colorHex = getTowerDisplayColor(def.towerType, tower.element);
+      // Use combo color if active, otherwise element/tower color
+      let colorHex = getTowerDisplayColor(def.towerType, tower.element);
+      if (me.activeCombo && (def.towerType === 'arrow' || def.towerType === 'cannon')) {
+        const combo = COMBO_MAP[me.activeCombo];
+        if (combo) colorHex = combo.color;
+      }
       const elemColor = Phaser.Display.Color.HexStringToColor(colorHex).color;
       const size = 12;
       const elemTier = me.elements ? (me.elements.length >= 2 ? 2 : me.elements.length >= 1 ? 1 : 0) : 0;
@@ -922,13 +983,41 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      // Star indicator
-      if (tower.stars >= 1) {
+      // Star indicator (T2 = ★★, T3 = ★★★)
+      if (tower.stars >= 2) {
         this.towerGfx.lineStyle(2, 0xffd93d, 0.8);
         this.towerGfx.strokeCircle(cx, cy, size + 5);
-        // Second glow
-        this.towerGfx.lineStyle(1, 0xffd93d, 0.4);
-        this.towerGfx.strokeCircle(cx, cy, size + 8);
+        if (tower.stars >= 3) {
+          this.towerGfx.lineStyle(2, 0xff4488, 0.9);
+          this.towerGfx.strokeCircle(cx, cy, size + 8);
+          this.towerGfx.lineStyle(1, 0xff4488, 0.5);
+          this.towerGfx.strokeCircle(cx, cy, size + 11);
+        } else {
+          this.towerGfx.lineStyle(1, 0xffd93d, 0.4);
+          this.towerGfx.strokeCircle(cx, cy, size + 8);
+        }
+      }
+
+      // Star dots above tower
+      if (tower.stars >= 2) {
+        const starColor = tower.stars >= 3 ? 0xff4488 : 0xffd93d;
+        this.towerGfx.fillStyle(starColor, 0.95);
+        const starY = cy - size - 6;
+        if (tower.stars === 2) {
+          this.towerGfx.fillCircle(cx - 3, starY, 2);
+          this.towerGfx.fillCircle(cx + 3, starY, 2);
+        } else {
+          this.towerGfx.fillCircle(cx - 5, starY, 2);
+          this.towerGfx.fillCircle(cx, starY, 2);
+          this.towerGfx.fillCircle(cx + 5, starY, 2);
+        }
+      }
+
+      // canUpgrade indicator: green pulsing border
+      if (tower.canUpgrade && this.gameState.phase === 'shopping') {
+        const pulse = 0.4 + 0.4 * Math.sin(Date.now() / 300);
+        this.towerGfx.lineStyle(2, 0x44ff44, pulse);
+        this.towerGfx.strokeCircle(cx, cy, size + 6);
       }
     }
   }
@@ -1057,6 +1146,12 @@ export class GameScene extends Phaser.Scene {
     }).setDepth(5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => socket.send({ type: 'REROLL' }));
 
+    this.add.text(btnX, shopY + 52, 'TECH TREE', {
+      fontSize: '13px', color: '#e0e8ff', backgroundColor: '#7b2fbe',
+      padding: { x: 8, y: 8 },
+    }).setDepth(5).setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.showTechTree());
+
     this.add.text(btnX, shopY + 86, '▶ SEND WAVE', {
       fontSize: '13px', color: '#e0e8ff', backgroundColor: '#ff4444',
       padding: { x: 8, y: 8 },
@@ -1102,39 +1197,57 @@ export class GameScene extends Phaser.Scene {
     this.uiTopLeft.setText(`❤️ ${me.hp}   💰 ${me.gold}`);
     this.updatePhaseText();
 
-    // Shop
+    // Shop (Feature 2: colored squares, no emojis)
+    // Check which shop slots enable upgrades
+    const shopUpgradeSlots = this.getShopUpgradeSlots(me);
+    
     for (let i = 0; i < 5; i++) {
       const defId = me.shop[i];
       const isSelected = this.selectedShopIndex === i;
+      const enablesUpgrade = shopUpgradeSlots.has(i);
 
       if (defId) {
         const def = TOWER_MAP[defId];
         if (def) {
-          const emoji: Record<string, string> = { arrow: '🔫', cannon: '🔧', income: '⛏️', pvp: '🌀' };
-          const displayText = `${emoji[def.towerType] || ''} ${def.name}\n${def.cost}g`;
-          const textColor = isSelected ? '#ffc107' : '#e0e8ff';
-          const bgColor = isSelected ? '#2a2a0a' : '#0d1117cc';
+          const color = SHOP_TOWER_COLORS[def.towerType] || '#888';
+          const displayText = `■ ${def.name}\n${def.cost}g`;
+          const textColor = isSelected ? '#ffc107' : color;
+          const bgColor = isSelected ? '#2a2a0a' : enablesUpgrade ? '#1a2a1a' : '#0d1117cc';
           this.uiShopSlots[i].setText(displayText).setColor(textColor).setBackgroundColor(bgColor);
+          // Pulsing border for upgrade-enabling slots
+          if (enablesUpgrade) {
+            const pulse = Math.sin(Date.now() / 300) > 0;
+            this.uiShopSlots[i].setStroke(pulse ? '#44ff44' : '#228822', 2);
+          } else {
+            this.uiShopSlots[i].setStroke('#000000', 0);
+          }
         }
       } else {
         this.uiShopSlots[i].setText('  — empty —').setColor('#444').setBackgroundColor('#0d1117cc');
+        this.uiShopSlots[i].setStroke('#000000', 0);
       }
     }
 
-    // Augment list with element display
+    // Augment list with element + combo display
     const augLines: string[] = [];
-    if (me.elements && me.elements.length > 0) {
+    if (me.activeCombo) {
+      const combo = COMBO_MAP[me.activeCombo];
+      if (combo) {
+        augLines.push(`${combo.name.toUpperCase()}`);
+        augLines.push(`${combo.description}`);
+        augLines.push('');
+      }
+    } else if (me.elements && me.elements.length > 0) {
       const activeElem = me.elements[me.elements.length - 1];
       const emoji = ELEMENT_EMOJI[activeElem as Element] || '';
-      const tierLabel = me.elements.length >= 2 ? ' T2' : '';
-      augLines.push(`⚡ ${emoji} ${activeElem.toUpperCase()}${tierLabel}`);
+      augLines.push(`${emoji} ${activeElem.toUpperCase()}`);
       augLines.push('');
     }
-    augLines.push('✨ AUGMENTS');
+    augLines.push('AUGMENTS');
     if (me.augments.length > 0) {
       for (const augId of me.augments) {
         const aug = AUGMENT_POOL.find(a => a.id === augId);
-        if (aug) augLines.push(`${aug.icon} ${aug.name}`);
+        if (aug) augLines.push(`  ${aug.name}`);
       }
     } else {
       augLines.push('  (none yet)');
@@ -1193,10 +1306,14 @@ export class GameScene extends Phaser.Scene {
     const me = this.me();
     if (!me) return;
 
-    // Click on existing tower = sell
+    // Click on existing tower = upgrade if available, else sell
     const existingTower = me.towers.find(t => t.position.row === pos.row && t.position.col === pos.col);
     if (existingTower) {
-      socket.send({ type: 'SELL_TOWER', instanceId: existingTower.instanceId });
+      if (this.gameState.phase === 'shopping' && existingTower.canUpgrade) {
+        this.showUpgradeButton(existingTower.instanceId, pos);
+      } else if (this.gameState.phase === 'shopping') {
+        socket.send({ type: 'SELL_TOWER', instanceId: existingTower.instanceId });
+      }
       return;
     }
 
@@ -1247,6 +1364,224 @@ export class GameScene extends Phaser.Scene {
         this.miniGfx.fillCircle(baseX + mob.x * miniCell + miniCell / 2, baseY + mob.y * miniCell + miniCell / 2, 2);
       }
     });
+  }
+
+  // ── Upgrade System ─────────────────────────────────────
+
+  private showUpgradeButton(towerId: string, pos: GridPos) {
+    this.hideUpgradeButton();
+    this.selectedTowerForUpgrade = towerId;
+    const x = GRID_X + pos.col * CELL + CELL / 2;
+    const y = GRID_Y + pos.row * CELL - 20;
+
+    this.upgradeButton = this.add.text(x, y, '⬆ UPGRADE', {
+      fontSize: '13px', color: '#0a0a14', backgroundColor: '#44ff44',
+      padding: { x: 8, y: 4 },
+      fontStyle: 'bold',
+    }).setOrigin(0.5).setDepth(15).setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => {
+        if (this.selectedTowerForUpgrade) {
+          socket.send({ type: 'UPGRADE_TOWER', towerId: this.selectedTowerForUpgrade });
+        }
+        this.hideUpgradeButton();
+      });
+
+    // Also add sell button next to it
+    const sellBtn = this.add.text(x, y + 22, 'SELL', {
+      fontSize: '11px', color: '#e0e8ff', backgroundColor: '#ff444488',
+      padding: { x: 6, y: 3 },
+    }).setOrigin(0.5).setDepth(15).setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => {
+        if (this.selectedTowerForUpgrade) {
+          socket.send({ type: 'SELL_TOWER', instanceId: this.selectedTowerForUpgrade });
+        }
+        this.hideUpgradeButton();
+      });
+
+    // Store sell button on upgrade button for cleanup
+    (this.upgradeButton as any)._sellBtn = sellBtn;
+  }
+
+  private hideUpgradeButton() {
+    if (this.upgradeButton) {
+      const sellBtn = (this.upgradeButton as any)._sellBtn;
+      if (sellBtn) sellBtn.destroy();
+      this.upgradeButton.destroy();
+      this.upgradeButton = null;
+    }
+    this.selectedTowerForUpgrade = null;
+  }
+
+  private showUpgradeAnimation(x: number, y: number, tier: TowerTier) {
+    const label = tier >= 3 ? '★★★ T3!' : '★★ T2!';
+    const color = tier >= 3 ? '#ff4488' : '#ffd93d';
+    
+    // Flash
+    const flash = this.add.circle(x, y, 30, Phaser.Display.Color.HexStringToColor(color).color, 0.6)
+      .setDepth(20);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      scaleX: 2, scaleY: 2,
+      duration: 400,
+      onComplete: () => flash.destroy(),
+    });
+
+    // Text
+    const text = this.add.text(x, y - 25, label, {
+      fontSize: '18px', color, fontStyle: 'bold',
+      stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(25);
+    this.tweens.add({
+      targets: text,
+      alpha: 0, y: y - 60,
+      duration: 1000,
+      onComplete: () => text.destroy(),
+    });
+  }
+
+  // ── Shop Upgrade Detection ────────────────────────────
+
+  /** Get shop slot indices that enable an upgrade for any placed tower */
+  private getShopUpgradeSlots(me: PlayerState): Set<number> {
+    const result = new Set<number>();
+    // For each tower type on field at T1, check if shop has 2+ of that type
+    const t1Types = new Set(me.towers.filter(t => t.stars === 1).map(t => t.defId));
+    
+    for (const defId of t1Types) {
+      const shopIndices: number[] = [];
+      for (let i = 0; i < me.shop.length; i++) {
+        if (me.shop[i] === defId) shopIndices.push(i);
+      }
+      if (shopIndices.length >= 2) {
+        for (const idx of shopIndices) result.add(idx);
+      }
+    }
+    return result;
+  }
+
+  // ── Combo Animations ──────────────────────────────────
+
+  private showComboUnlockAnimation(comboName: string, comboColor: string) {
+    const cx = GRID_X + GRID_PX / 2;
+    const cy = GRID_Y + GRID_PX / 2;
+    
+    const text = this.add.text(cx, cy, `${comboName.toUpperCase()} UNLOCKED!`, {
+      fontSize: '32px', color: comboColor, fontStyle: 'bold',
+      stroke: '#000', strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(25).setAlpha(0);
+
+    this.tweens.add({
+      targets: text,
+      alpha: 1,
+      scaleX: { from: 0.5, to: 1.2 },
+      scaleY: { from: 0.5, to: 1.2 },
+      duration: 400,
+      yoyo: true,
+      hold: 800,
+      onComplete: () => text.destroy(),
+    });
+  }
+
+  // ── Tech Tree Overlay (Feature 3) ─────────────────────
+
+  private showTechTree() {
+    if (this.techTreeVisible) { this.hideTechTree(); return; }
+    this.techTreeVisible = true;
+    
+    const cx = GRID_X + GRID_PX / 2;
+    const cy = GRID_Y + GRID_PX / 2;
+    
+    this.techTreeOverlay = this.add.container(0, 0).setDepth(20);
+    
+    // Backdrop
+    const backdrop = this.add.rectangle(cx, cy, GRID_PX + 200, GRID_PX + 100, 0x000000, 0.9)
+      .setInteractive();
+    this.techTreeOverlay.add(backdrop);
+    
+    // Title
+    const title = this.add.text(cx, cy - 230, 'ELEMENT COMBO TECH TREE', {
+      fontSize: '22px', color: '#FFD93D', fontStyle: 'bold',
+      stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5);
+    this.techTreeOverlay.add(title);
+
+    // Close button
+    const closeBtn = this.add.text(cx + 280, cy - 230, '✕', {
+      fontSize: '20px', color: '#ff4444',
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.hideTechTree());
+    this.techTreeOverlay.add(closeBtn);
+    
+    const me = this.me();
+    const myElements = me?.elements || [];
+    const myCombo = me?.activeCombo;
+    
+    // Grid layout: 7 columns x 3 rows
+    const cols = 7;
+    const cardW = 78;
+    const cardH = 60;
+    const gap = 4;
+    const startX = cx - ((cols - 1) * (cardW + gap)) / 2;
+    const startY = cy - 150;
+    
+    COMBO_DEFS.forEach((combo, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const cardX = startX + col * (cardW + gap);
+      const cardY = startY + row * (cardH + gap + 20);
+      
+      const isActive = myCombo === combo.id;
+      const isPossible = myElements.includes(combo.elements[0]) || myElements.includes(combo.elements[1]);
+      const alpha = isActive ? 1 : isPossible ? 0.7 : 0.3;
+      
+      const bgColor = isActive ? Phaser.Display.Color.HexStringToColor(combo.color).color : 0x222233;
+      const card = this.add.rectangle(cardX, cardY, cardW, cardH, bgColor, alpha * 0.8);
+      if (isActive) card.setStrokeStyle(2, 0xffd93d);
+      else if (isPossible) card.setStrokeStyle(1, Phaser.Display.Color.HexStringToColor(combo.color).color);
+      this.techTreeOverlay!.add(card);
+      
+      // Element icons
+      const e1 = ELEMENT_EMOJI[combo.elements[0]] || '?';
+      const e2 = ELEMENT_EMOJI[combo.elements[1]] || '?';
+      const elemText = this.add.text(cardX, cardY - 12, `${e1}+${e2}`, {
+        fontSize: '11px', color: '#ffffff',
+      }).setOrigin(0.5).setAlpha(alpha);
+      this.techTreeOverlay!.add(elemText);
+      
+      // Combo name
+      const nameText = this.add.text(cardX, cardY + 8, combo.name, {
+        fontSize: '10px', color: combo.color, fontStyle: 'bold',
+      }).setOrigin(0.5).setAlpha(alpha);
+      this.techTreeOverlay!.add(nameText);
+      
+      // Hover for description
+      card.setInteractive();
+      card.on('pointerover', () => {
+        if (this.techTreeOverlay) {
+          // Show description tooltip
+          const desc = this.add.text(cardX, cardY + cardH / 2 + 10, combo.description, {
+            fontSize: '10px', color: '#cccccc', backgroundColor: '#000000cc',
+            padding: { x: 4, y: 2 },
+            wordWrap: { width: 160 },
+          }).setOrigin(0.5, 0).setDepth(25);
+          (card as any)._tooltip = desc;
+          this.techTreeOverlay!.add(desc);
+        }
+      });
+      card.on('pointerout', () => {
+        const tt = (card as any)._tooltip;
+        if (tt) { tt.destroy(); (card as any)._tooltip = null; }
+      });
+    });
+  }
+
+  private hideTechTree() {
+    this.techTreeVisible = false;
+    if (this.techTreeOverlay) {
+      this.techTreeOverlay.destroy();
+      this.techTreeOverlay = null;
+    }
   }
 
   private me(): PlayerState | undefined {
