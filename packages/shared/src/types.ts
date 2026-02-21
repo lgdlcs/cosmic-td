@@ -1,3 +1,5 @@
+import type { Element } from './elements.js';
+
 // ── Core Enums ──────────────────────────────────────────
 
 export type TowerType = 'arrow' | 'cannon' | 'income' | 'pvp';
@@ -38,6 +40,7 @@ export interface TowerInstance {
   defId: string;        // tower def id (arrow, cannon, income, pvp)
   position: GridPos;
   stars: number;        // 0 = base, 1 = ★ (fused from 3)
+  element?: Element;    // assigned when player picks an element augment
 }
 
 // ── Mob ─────────────────────────────────────────────────
@@ -53,7 +56,7 @@ export interface MobDef {
 }
 
 export interface MobEffect {
-  type: 'slow' | 'poison' | 'burn' | 'freeze';
+  type: 'slow' | 'poison' | 'burn' | 'freeze' | 'stun' | 'armorReduce';
   remaining: number;
   value: number;
 }
@@ -68,6 +71,8 @@ export interface MobInstance {
   pathIndex: number;
   effects: MobEffect[];
   visible: boolean;
+  element?: Element;    // assigned from round 3+
+  armor?: number;       // base 0, can be reduced by dark cannon
 }
 
 // ── Player ──────────────────────────────────────────────
@@ -81,6 +86,7 @@ export interface PlayerState {
   towers: TowerInstance[];
   shop: (string | null)[];    // 5 shop slots, tower defIds or null
   augments: string[];         // picked augment IDs
+  elements: Element[];        // collected element augments (ordered)
   streak: number;
   alive: boolean;
 }
@@ -157,6 +163,9 @@ export interface CombatAttack {
   targetY: number;
   damage: number;
   element: string;
+  towerElement?: Element;
+  mobElement?: Element;
+  effectiveness?: 'strong' | 'weak' | 'neutral';
   splash: boolean;
 }
 

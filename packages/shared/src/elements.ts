@@ -1,119 +1,127 @@
-import type { TowerDef, TowerType } from './types.js';
+// ── Element System ──────────────────────────────────────
 
-// ── 4 Simple Tower Types ────────────────────────────────
+export type Element = 'fire' | 'water' | 'earth' | 'dark' | 'light' | 'nature' | 'wind';
 
-export const TOWER_DEFS: TowerDef[] = [
-  {
-    id: 'arrow',
-    name: 'Arrow Tower',
-    towerType: 'arrow',
-    cost: 3,
-    damage: 8,
-    attackSpeed: 1.25,  // 1/0.8
-    range: 3,
-    description: 'Fast attacks, low damage',
-  },
-  {
-    id: 'cannon',
-    name: 'Cannon',
-    towerType: 'cannon',
-    cost: 5,
-    damage: 25,
-    attackSpeed: 0.5,  // 1/2.0
-    range: 2.5,
-    description: 'Slow, high damage, small splash',
-    splashRadius: 0.5,
-  },
-  {
-    id: 'income',
-    name: 'Gold Mine',
-    towerType: 'income',
-    cost: 7,
-    damage: 0,
-    attackSpeed: 0,
-    range: 0,
-    description: 'Generates +2 gold per round',
-    incomePerRound: 2,
-  },
-  {
-    id: 'pvp',
-    name: 'Monster Pit',
-    towerType: 'pvp',
-    cost: 6,
-    damage: 0,
-    attackSpeed: 0,
-    range: 0,
-    description: 'Sends a mob to opponent each round',
-    mobPower: 1.0,
-  },
+export const ALL_ELEMENTS: Element[] = ['fire', 'water', 'earth', 'dark', 'light', 'nature', 'wind'];
+
+export const ELEMENT_EMOJI: Record<Element, string> = {
+  fire: '🔥',
+  water: '💧',
+  earth: '🌍',
+  dark: '🌑',
+  light: '☀️',
+  nature: '🌿',
+  wind: '💨',
+};
+
+export const ELEMENT_COLOR: Record<Element, string> = {
+  fire: '#FF4422',
+  water: '#4488FF',
+  earth: '#AA8844',
+  dark: '#8844AA',
+  light: '#FFDD44',
+  nature: '#44CC44',
+  wind: '#88CCCC',
+};
+
+export const ELEMENT_COLOR_HEX: Record<Element, number> = {
+  fire: 0xFF4422,
+  water: 0x4488FF,
+  earth: 0xAA8844,
+  dark: 0x8844AA,
+  light: 0xFFDD44,
+  nature: 0x44CC44,
+  wind: 0x88CCCC,
+};
+
+// ── Weakness Table ──────────────────────────────────────
+
+/** Maps element → what it's strong against */
+const STRONG_VS: Record<Element, Element> = {
+  fire: 'nature',
+  water: 'fire',
+  earth: 'light',
+  dark: 'water',
+  light: 'dark',
+  nature: 'water',
+  wind: 'earth',
+};
+
+/** Maps element → what it's weak against */
+const WEAK_VS: Record<Element, Element> = {
+  fire: 'water',
+  water: 'nature',
+  earth: 'dark',
+  dark: 'light',
+  light: 'earth',
+  nature: 'fire',
+  wind: 'nature',
+};
+
+export function isStrongAgainst(attacker: Element, defender: Element): boolean {
+  return STRONG_VS[attacker] === defender;
+}
+
+export function isWeakAgainst(attacker: Element, defender: Element): boolean {
+  return WEAK_VS[attacker] === defender;
+}
+
+export function getElementMultiplier(towerElement: Element | undefined, mobElement: Element | undefined): number {
+  if (!towerElement || !mobElement) return 1.0;
+  if (isStrongAgainst(towerElement, mobElement)) return 2.0;
+  if (isWeakAgainst(towerElement, mobElement)) return 0.5;
+  return 1.0;
+}
+
+/** Get effectiveness label */
+export function getEffectiveness(towerElement: Element | undefined, mobElement: Element | undefined): 'strong' | 'weak' | 'neutral' {
+  if (!towerElement || !mobElement) return 'neutral';
+  if (isStrongAgainst(towerElement, mobElement)) return 'strong';
+  if (isWeakAgainst(towerElement, mobElement)) return 'weak';
+  return 'neutral';
+}
+
+// ── Dual Element Combinations ───────────────────────────
+
+export interface ElementCombo {
+  elements: [Element, Element];
+  name: string;
+  emoji: string;
+}
+
+export const ELEMENT_COMBOS: ElementCombo[] = [
+  { elements: ['fire', 'water'], name: 'Steam', emoji: '♨️' },
+  { elements: ['fire', 'earth'], name: 'Magma', emoji: '🌋' },
+  { elements: ['fire', 'wind'], name: 'Inferno', emoji: '🔥' },
+  { elements: ['fire', 'dark'], name: 'Hellfire', emoji: '👿' },
+  { elements: ['fire', 'light'], name: 'Solar', emoji: '🌞' },
+  { elements: ['fire', 'nature'], name: 'Wildfire', emoji: '🏕️' },
+  { elements: ['water', 'earth'], name: 'Mud', emoji: '🏺' },
+  { elements: ['water', 'wind'], name: 'Storm', emoji: '🌊' },
+  { elements: ['water', 'dark'], name: 'Abyss', emoji: '🕳️' },
+  { elements: ['water', 'light'], name: 'Ice', emoji: '❄️' },
+  { elements: ['water', 'nature'], name: 'Bloom', emoji: '🌸' },
+  { elements: ['earth', 'dark'], name: 'Void', emoji: '⬛' },
+  { elements: ['earth', 'light'], name: 'Crystal', emoji: '💎' },
+  { elements: ['earth', 'nature'], name: 'Forest', emoji: '🌲' },
+  { elements: ['earth', 'wind'], name: 'Dust', emoji: '🌪️' },
+  { elements: ['dark', 'light'], name: 'Eclipse', emoji: '🌓' },
+  { elements: ['dark', 'nature'], name: 'Decay', emoji: '🍂' },
+  { elements: ['dark', 'wind'], name: 'Shadow', emoji: '👤' },
+  { elements: ['light', 'nature'], name: 'Life', emoji: '🌱' },
+  { elements: ['light', 'wind'], name: 'Flash', emoji: '⚡' },
+  { elements: ['nature', 'wind'], name: 'Gale', emoji: '🍃' },
 ];
 
-export const TOWER_MAP: Record<string, TowerDef> = Object.fromEntries(
-  TOWER_DEFS.map((t) => [t.id, t])
-);
-
-// ── Star Upgrade Stats ──────────────────────────────────
-
-export interface TowerStats {
-  damage: number;
-  attackSpeed: number;
-  range: number;
-  splashRadius?: number;
-  incomePerRound?: number;
-  mobPower?: number;
-  displayName: string;
+/** Find combo for two elements (order doesn't matter) */
+export function getElementCombo(a: Element, b: Element): ElementCombo | undefined {
+  return ELEMENT_COMBOS.find(c =>
+    (c.elements[0] === a && c.elements[1] === b) ||
+    (c.elements[0] === b && c.elements[1] === a)
+  );
 }
 
-/** Get tower stats accounting for star level and augments */
-export function getTowerStats(
-  def: TowerDef,
-  stars: number,
-  augmentIds?: string[],
-): TowerStats {
-  const starMult = stars >= 1 ? 2 : 1; // ★ = 2x stats
-
-  let damage = def.damage * starMult;
-  let attackSpeed = def.attackSpeed * starMult;
-  let range = def.range;
-  let splashRadius = def.splashRadius;
-  let incomePerRound = def.incomePerRound ? def.incomePerRound * starMult : undefined;
-  let mobPower = def.mobPower ? def.mobPower * starMult : undefined;
-
-  // Apply augment buffs
-  if (augmentIds) {
-    for (const id of augmentIds) {
-      if (id === 'ARROW_MASTERY' && def.towerType === 'arrow') {
-        damage *= 1.2;
-      }
-      if (id === 'CANNON_MASTERY' && def.towerType === 'cannon' && splashRadius) {
-        splashRadius *= 1.5;
-      }
-      if (id === 'MEGA_INCOME' && def.towerType === 'income' && incomePerRound) {
-        incomePerRound *= 2;
-      }
-      if (id === 'WIND_BOOST') {
-        attackSpeed *= (1 / 0.85); // 15% faster
-      }
-    }
-  }
-
-  const starLabel = stars >= 1 ? ' ★' : '';
-  return {
-    damage: Math.round(damage * 10) / 10,
-    attackSpeed: Math.round(attackSpeed * 100) / 100,
-    range,
-    splashRadius,
-    incomePerRound,
-    mobPower,
-    displayName: `${def.name}${starLabel}`,
-  };
+/** Get a random element */
+export function randomElement(): Element {
+  return ALL_ELEMENTS[Math.floor(Math.random() * ALL_ELEMENTS.length)];
 }
-
-// ── Tower Colors for Rendering ──────────────────────────
-
-export const TOWER_COLORS: Record<TowerType, string> = {
-  arrow: '#4EA8DE',
-  cannon: '#FF6B35',
-  income: '#FFD93D',
-  pvp: '#9B5DE5',
-};

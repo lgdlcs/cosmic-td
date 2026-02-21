@@ -30,6 +30,7 @@ import {
   isAugmentRound,
   generateAugmentChoices,
   AUGMENT_POOL,
+  randomElement,
 } from '@ect/shared';
 import { ShopManager } from './shop.js';
 import { CombatManager } from './combat.js';
@@ -75,6 +76,7 @@ export class Game {
       towers: [],
       shop: Array(SHOP_SLOTS).fill(null),
       augments: [],
+      elements: [],
       streak: 0,
       alive: true,
     }));
@@ -123,11 +125,16 @@ export class Game {
         const cost = TOWER_COSTS[def.id] || def.cost;
         if (player.gold < cost) return;
 
+        // Assign element if player has one and tower is arrow/cannon
+        const activeElement = player.elements.length > 0 ? player.elements[player.elements.length - 1] : undefined;
+        const getsElement = (def.towerType === 'arrow' || def.towerType === 'cannon') && activeElement;
+        
         const tower: TowerInstance = {
           instanceId: nanoid(8),
           defId: itemId,
           position: msg.position,
           stars: 0,
+          element: getsElement ? activeElement : undefined,
         };
         player.towers.push(tower);
         player.gold -= cost;
@@ -164,6 +171,20 @@ export class Game {
         
         player.augments.push(msg.augmentId);
         this.augmentPicked.add(playerId);
+        
+        // Track element picks and update tower elements
+        const pickedAug = AUGMENT_POOL.find(a => a.id === msg.augmentId);
+        if (pickedAug && pickedAug.effect.type === 'element') {
+          player.elements.push(pickedAug.effect.element);
+          const activeElement = pickedAug.effect.element;
+          // Update all arrow and cannon towers with this element
+          for (const tower of player.towers) {
+            const def = TOWER_MAP[tower.defId];
+            if (def && (def.towerType === 'arrow' || def.towerType === 'cannon')) {
+              tower.element = activeElement;
+            }
+          }
+        }
         
         this.broadcast({ type: 'AUGMENT_PICKED', playerId, augmentId: msg.augmentId });
         
@@ -247,6 +268,8 @@ export class Game {
       pathIndex: 0,
       effects: [],
       visible: true,
+      element: leakedMob.element,
+      armor: 0,
     };
 
     if (!this.state.mobs[target.id]) {
@@ -325,6 +348,17 @@ export class Game {
           if (choices.length > 0) {
             const randomPick = choices[Math.floor(Math.random() * choices.length)];
             p.augments.push(randomPick);
+            // Track element for auto-picks too
+            const aug = AUGMENT_POOL.find(a => a.id === randomPick);
+            if (aug && aug.effect.type === 'element') {
+              p.elements.push(aug.effect.element);
+              for (const tower of p.towers) {
+                const def = TOWER_MAP[tower.defId];
+                if (def && (def.towerType === 'arrow' || def.towerType === 'cannon')) {
+                  tower.element = aug.effect.element;
+                }
+              }
+            }
             this.broadcast({ type: 'AUGMENT_PICKED', playerId: p.id, augmentId: randomPick });
           }
         });
@@ -412,6 +446,8 @@ export class Game {
             pathIndex: 0,
             effects: [],
             visible: true,
+            element: this.state.round >= 3 ? randomElement() : undefined,
+            armor: 0,
           };
           if (!this.state.mobs[target.id]) this.state.mobs[target.id] = [];
           this.state.mobs[target.id].push(newMob);

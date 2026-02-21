@@ -18,8 +18,14 @@ import {
   TOWER_COLOR_HEX,
   isPathCell,
   getTowerStats,
+  getTowerDisplayColor,
   AUGMENT_POOL,
+  ELEMENT_EMOJI,
+  ELEMENT_COLOR,
+  ELEMENT_COLOR_HEX,
+  getEffectiveness,
 } from '@ect/shared';
+import type { Element } from '@ect/shared';
 
 // ── Procedural Sound Effects (Web Audio API) ───────────
 
@@ -453,7 +459,14 @@ export class GameScene extends Phaser.Scene {
       const sy = GRID_Y + atk.towerY * CELL + CELL / 2;
       const tx = GRID_X + atk.targetX * CELL + CELL / 2;
       const ty = GRID_Y + atk.targetY * CELL + CELL / 2;
-      const colorHex = TOWER_COLOR_HEX[atk.element as keyof typeof TOWER_COLOR_HEX] || '#ffffff';
+      
+      // Use element color if tower has element, otherwise tower type color
+      let colorHex: string;
+      if (atk.towerElement && ELEMENT_COLOR[atk.towerElement as Element]) {
+        colorHex = ELEMENT_COLOR[atk.towerElement as Element];
+      } else {
+        colorHex = TOWER_COLOR_HEX[atk.element as keyof typeof TOWER_COLOR_HEX] || '#ffffff';
+      }
       const color = Phaser.Display.Color.HexStringToColor(colorHex).color;
 
       this.projectiles.push({
@@ -463,6 +476,13 @@ export class GameScene extends Phaser.Scene {
         alive: true,
         splash: atk.splash,
       });
+
+      // Effectiveness-colored damage text
+      if (atk.effectiveness && atk.effectiveness !== 'neutral') {
+        const effColor = atk.effectiveness === 'strong' ? '#FF4444' : '#888888';
+        const effText = atk.effectiveness === 'strong' ? `${Math.round(atk.damage)}!` : `${Math.round(atk.damage)}`;
+        this.spawnFloatingText(tx + (Math.random() - 0.5) * 8, ty - 12, effText, -20);
+      }
     }
 
     if (kills.length > 0) sfx.mobDeath();
@@ -577,11 +597,16 @@ export class GameScene extends Phaser.Scene {
         this.hoveredTower = tower.instanceId;
         const def = TOWER_MAP[tower.defId];
         if (def && me) {
-          const stats = getTowerStats(def, tower.stars, me.augments);
-          const starLabel = tower.stars >= 1 ? ' ★' : '';
+          const elemTier = me.elements ? (me.elements.length >= 2 ? 2 : me.elements.length >= 1 ? 1 : 0) : 0;
+          const activeElement = me.elements && me.elements.length > 0 ? me.elements[me.elements.length - 1] as Element : undefined;
+          const stats = getTowerStats(def, tower.stars, me.augments, activeElement, elemTier);
 
           let info = `${stats.displayName}\n`;
           info += `${def.description}\n`;
+          if (tower.element) {
+            const emoji = ELEMENT_EMOJI[tower.element as Element] || '';
+            info += `Element: ${emoji} ${tower.element}\n`;
+          }
           if (stats.damage > 0) info += `DMG: ${stats.damage}  ATK SPD: ${stats.attackSpeed}/s  RANGE: ${stats.range}\n`;
           if (stats.splashRadius) info += `Splash: ${stats.splashRadius}\n`;
           if (stats.incomePerRound) info += `Income: +${stats.incomePerRound}g/round\n`;
@@ -765,15 +790,41 @@ export class GameScene extends Phaser.Scene {
       this.mobGfx.fillStyle(hpColor, 0.9);
       this.mobGfx.fillRect(barX, barY, barW * hpRatio, barH);
 
+      // Element indicator on mob
+      if (mob.element) {
+        const eHex = ELEMENT_COLOR_HEX[mob.element as Element];
+        if (eHex) {
+          this.mobGfx.fillStyle(eHex, 0.7);
+          this.mobGfx.fillCircle(x + radius + 3, y - radius - 3, 3);
+        }
+      }
+
       // Effect indicators
+      let effX = x - 6;
       for (const eff of mob.effects) {
         if (eff.type === 'slow' && eff.value > 0) {
           this.mobGfx.fillStyle(0x4EA8DE, 0.7);
-          this.mobGfx.fillCircle(x - 4, y + radius + 6, 3);
+          this.mobGfx.fillCircle(effX, y + radius + 6, 3);
+          effX += 6;
         }
         if (eff.type === 'burn') {
           this.mobGfx.fillStyle(0xFF6B35, 0.7);
-          this.mobGfx.fillCircle(x + 4, y + radius + 6, 3);
+          this.mobGfx.fillCircle(effX, y + radius + 6, 3);
+          effX += 6;
+        }
+        if (eff.type === 'poison') {
+          this.mobGfx.fillStyle(0x8844AA, 0.7);
+          this.mobGfx.fillCircle(effX, y + radius + 6, 3);
+          effX += 6;
+        }
+        if (eff.type === 'stun') {
+          this.mobGfx.fillStyle(0xFFDD44, 0.9);
+          this.mobGfx.fillCircle(x, y - radius - 5, 4);
+        }
+        if (eff.type === 'armorReduce') {
+          this.mobGfx.fillStyle(0x8844AA, 0.5);
+          this.mobGfx.fillCircle(effX, y + radius + 6, 3);
+          effX += 6;
         }
       }
     }
@@ -792,10 +843,12 @@ export class GameScene extends Phaser.Scene {
 
       const cx = GRID_X + tower.position.col * CELL + CELL / 2;
       const cy = GRID_Y + tower.position.row * CELL + CELL / 2;
-      const colorHex = TOWER_COLOR_HEX[def.towerType] || '#666666';
+      const colorHex = getTowerDisplayColor(def.towerType, tower.element);
       const elemColor = Phaser.Display.Color.HexStringToColor(colorHex).color;
       const size = 12;
-      const stats = getTowerStats(def, tower.stars, me.augments);
+      const elemTier = me.elements ? (me.elements.length >= 2 ? 2 : me.elements.length >= 1 ? 1 : 0) : 0;
+      const activeElement = me.elements && me.elements.length > 0 ? me.elements[me.elements.length - 1] : undefined;
+      const stats = getTowerStats(def, tower.stars, me.augments, activeElement as Element | undefined, elemTier);
 
       // Range circle
       const isHovered = this.hoveredTower === tower.instanceId;
@@ -835,6 +888,17 @@ export class GameScene extends Phaser.Scene {
           this.towerGfx.fillTriangle(cx, cy - size, cx + size, cy, cx, cy + size);
           this.towerGfx.fillTriangle(cx, cy - size, cx - size, cy, cx, cy + size);
           break;
+      }
+
+      // Element glow
+      if (tower.element) {
+        const eColor = ELEMENT_COLOR_HEX[tower.element as Element];
+        if (eColor) {
+          this.towerGfx.lineStyle(2, eColor, 0.5);
+          this.towerGfx.strokeCircle(cx, cy, size + 4);
+          this.towerGfx.fillStyle(eColor, 0.12);
+          this.towerGfx.fillCircle(cx, cy, size + 4);
+        }
       }
 
       // Star indicator
@@ -1036,17 +1100,25 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Augment list
+    // Augment list with element display
+    const augLines: string[] = [];
+    if (me.elements && me.elements.length > 0) {
+      const activeElem = me.elements[me.elements.length - 1];
+      const emoji = ELEMENT_EMOJI[activeElem as Element] || '';
+      const tierLabel = me.elements.length >= 2 ? ' T2' : '';
+      augLines.push(`⚡ ${emoji} ${activeElem.toUpperCase()}${tierLabel}`);
+      augLines.push('');
+    }
+    augLines.push('✨ AUGMENTS');
     if (me.augments.length > 0) {
-      const augLines = ['✨ AUGMENTS'];
       for (const augId of me.augments) {
         const aug = AUGMENT_POOL.find(a => a.id === augId);
         if (aug) augLines.push(`${aug.icon} ${aug.name}`);
       }
-      this.uiAugmentList.setText(augLines.join('\n'));
     } else {
-      this.uiAugmentList.setText('✨ No augments yet');
+      augLines.push('  (none yet)');
     }
+    this.uiAugmentList.setText(augLines.join('\n'));
 
     // Opponents
     const opponents = this.gameState.players.filter((p) => p.id !== this.myId);

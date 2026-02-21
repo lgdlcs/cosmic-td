@@ -5,6 +5,7 @@ import type {
   PlayerState,
   MobInstance,
   GridPos,
+  Element,
 } from '@ect/shared';
 import {
   MOB_BASE_HP,
@@ -22,6 +23,9 @@ import {
   SWARM_HP_MULT,
   getTowerStats,
   AUGMENT_POOL,
+  getElementMultiplier,
+  getEffectiveness,
+  randomElement,
 } from '@ect/shared';
 
 export interface AttackEvent {
@@ -33,6 +37,9 @@ export interface AttackEvent {
   targetY: number;
   damage: number;
   element: string;
+  towerElement?: Element;
+  mobElement?: Element;
+  effectiveness?: 'strong' | 'weak' | 'neutral';
   splash: boolean;
 }
 
@@ -53,16 +60,40 @@ export interface ZonePlacement {
   slowPercent?: number;
 }
 
+/** Temporary nature turret spawned by Nature Cannon */
+interface NatureTurret {
+  x: number;
+  y: number;
+  damage: number;
+  remaining: number; // ms
+  attackCooldown: number;
+}
+
+/** Track consecutive hits for Light Arrow */
+type ConsecutiveHits = Map<string, Map<string, number>>; // towerId → mobId → count
+
 export class CombatManager {
   state: GameState;
   map: GameMap;
   cooldowns: Map<string, number> = new Map();
   /** Zone placements per player (auto-placed along path) */
   playerZones: Map<string, ZonePlacement[]> = new Map();
+  /** Temporary nature turrets per player */
+  natureTurrets: Map<string, NatureTurret[]> = new Map();
+  /** Light arrow consecutive hit tracking */
+  consecutiveHits: ConsecutiveHits = new Map();
 
   constructor(state: GameState, map: GameMap) {
     this.state = state;
     this.map = map;
+  }
+
+  /** Get the active element and tier for a player's towers */
+  getPlayerElement(player: PlayerState): { element?: Element; tier: number } {
+    if (!player.elements || player.elements.length === 0) return { tier: 0 };
+    const element = player.elements[player.elements.length - 1]; // last picked
+    const tier = player.elements.length >= 2 ? 2 : 1;
+    return { element, tier };
   }
 
   /** Setup zones for a player based on their augments at combat start */
@@ -71,29 +102,54 @@ export class CombatManager {
     const pathMid = Math.floor(this.map.path.length / 2);
     
     const fireZoneMultiplier = player.augments.includes('FIRE_STORM') ? 3 : 1;
+    const { element: playerElem } = this.getPlayerElement(player);
 
+    let zoneIndex = 0;
     for (const augId of player.augments) {
       const aug = AUGMENT_POOL.find(a => a.id === augId);
       if (!aug) continue;
       
-      if (aug.effect.type === 'zone' && aug.effect.element === 'fire') {
-        const pathPoint = this.map.path[Math.min(pathMid, this.map.path.length - 1)];
-        zones.push({
-          augmentId: augId,
-          x: pathPoint.col,
-          y: pathPoint.row,
-          radius: aug.effect.radius,
-          dps: aug.effect.dps * fireZoneMultiplier,
-        });
-      } else if (aug.effect.type === 'zone' && aug.effect.element === 'water') {
-        const pathPoint = this.map.path[Math.min(pathMid + 5, this.map.path.length - 1)];
-        zones.push({
-          augmentId: augId,
-          x: pathPoint.col,
-          y: pathPoint.row,
-          radius: aug.effect.radius,
-          slowPercent: aug.effect.slowPercent,
-        });
+      if (aug.effect.type === 'zone') {
+        const pathOffset = pathMid + zoneIndex * 5;
+        const pathPoint = this.map.path[Math.min(pathOffset, this.map.path.length - 1)];
+        
+        if (aug.effect.element === 'fire') {
+          zones.push({
+            augmentId: augId,
+            x: pathPoint.col,
+            y: pathPoint.row,
+            radius: aug.effect.radius,
+            dps: aug.effect.dps * fireZoneMultiplier,
+          });
+        } else if (aug.effect.element === 'water') {
+          zones.push({
+            augmentId: augId,
+            x: pathPoint.col,
+            y: pathPoint.row,
+            radius: aug.effect.radius,
+            slowPercent: aug.effect.slowPercent,
+          });
+        } else if (aug.effect.element === 'neutral') {
+          // Neutral zone upgrades based on player's element
+          const zone: ZonePlacement = {
+            augmentId: augId,
+            x: pathPoint.col,
+            y: pathPoint.row,
+            radius: aug.effect.radius,
+            slowPercent: aug.effect.slowPercent,
+          };
+          // Upgrade zone based on player element
+          if (playerElem === 'fire') {
+            zone.dps = 8;
+            zone.slowPercent = undefined;
+          } else if (playerElem === 'water') {
+            zone.slowPercent = 30;
+          } else if (playerElem === 'earth') {
+            zone.radius = aug.effect.radius * 1.5;
+          }
+          zones.push(zone);
+        }
+        zoneIndex++;
       }
     }
     
@@ -107,9 +163,8 @@ export class CombatManager {
     const baseCount = Math.floor(MOB_COUNT_BASE + MOB_COUNT_SCALE * round);
 
     const mobs: MobInstance[] = [];
+    const assignElement = round >= 3;
 
-    // PvP mobs from opponent monster pits are handled in game.ts
-    
     // Global slow from BLIZZARD augment
     const hasGlobalSlow = player.augments.includes('BLIZZARD');
 
@@ -131,6 +186,8 @@ export class CombatManager {
           pathIndex: 0,
           effects,
           visible: true,
+          element: assignElement ? randomElement() : undefined,
+          armor: 0,
         });
       }
     } else {
@@ -170,14 +227,172 @@ export class CombatManager {
           pathIndex: 0,
           effects,
           visible: true,
+          element: assignElement ? randomElement() : undefined,
+          armor: 0,
         });
       }
     }
 
-    // Setup zone augments
+    // Setup zone augments and clear nature turrets
     this.setupZones(player);
+    this.natureTurrets.set(player.id, []);
+    this.consecutiveHits.clear();
 
     return mobs;
+  }
+
+  /** Apply elemental effects from a tower attack */
+  private applyElementalEffects(
+    tower: { defId: string; instanceId: string },
+    target: MobInstance,
+    towerElement: Element | undefined,
+    elementTier: number,
+    damage: number,
+    remaining: MobInstance[],
+    player: PlayerState,
+  ) {
+    if (!towerElement) return;
+    const def = TOWER_MAP[tower.defId];
+    if (!def) return;
+    const t2 = elementTier >= 2; // tier 2 = stronger effects
+
+    if (def.towerType === 'arrow') {
+      switch (towerElement) {
+        case 'fire': {
+          // Burn DoT
+          const dps = t2 ? 5 : 3;
+          const dur = t2 ? 2500 : 2000;
+          target.effects.push({ type: 'burn', remaining: dur, value: dps });
+          break;
+        }
+        case 'water': {
+          // Slow
+          const slow = t2 ? 0.30 : 0.20;
+          const dur = t2 ? 1500 : 1000;
+          target.effects.push({ type: 'slow', remaining: dur, value: slow });
+          break;
+        }
+        case 'earth': {
+          // Stun chance
+          const chance = t2 ? 0.15 : 0.10;
+          if (Math.random() < chance) {
+            target.effects.push({ type: 'stun', remaining: 500, value: 1 });
+          }
+          break;
+        }
+        case 'dark': {
+          // Poison DoT (stacks)
+          const dps = t2 ? 3 : 2;
+          const dur = t2 ? 4000 : 3000;
+          target.effects.push({ type: 'poison', remaining: dur, value: dps });
+          break;
+        }
+        case 'light': {
+          // Consecutive hit bonus — tracked externally
+          const towerHits = this.consecutiveHits.get(tower.instanceId) || new Map();
+          const hits = (towerHits.get(target.instanceId) || 0) + 1;
+          towerHits.set(target.instanceId, hits);
+          this.consecutiveHits.set(tower.instanceId, towerHits);
+          // Bonus already applied in damage calc
+          break;
+        }
+        case 'nature': {
+          // Entangle (slow)
+          const slow = t2 ? 0.40 : 0.30;
+          target.effects.push({ type: 'slow', remaining: 500, value: slow });
+          break;
+        }
+        case 'wind': {
+          // Attack speed bonus handled in getTowerStats
+          break;
+        }
+      }
+    } else if (def.towerType === 'cannon') {
+      switch (towerElement) {
+        case 'fire': {
+          // Fire patch — apply burn to all in splash
+          const dps = t2 ? 4 : 2;
+          for (const m of remaining) {
+            const dx = m.x - target.x;
+            const dy = m.y - target.y;
+            if (Math.sqrt(dx * dx + dy * dy) <= 1.5) {
+              m.effects.push({ type: 'burn', remaining: 2000, value: dps });
+            }
+          }
+          break;
+        }
+        case 'water': {
+          // Frost zone — slow all in splash
+          const slow = t2 ? 0.35 : 0.25;
+          for (const m of remaining) {
+            const dx = m.x - target.x;
+            const dy = m.y - target.y;
+            if (Math.sqrt(dx * dx + dy * dy) <= 1.5) {
+              m.effects.push({ type: 'slow', remaining: 1500, value: slow });
+            }
+          }
+          break;
+        }
+        case 'earth': {
+          // Splash radius bonus handled in getTowerStats
+          break;
+        }
+        case 'dark': {
+          // Armor reduce
+          const reduction = t2 ? 0.25 : 0.15;
+          target.effects.push({ type: 'armorReduce', remaining: 3000, value: reduction });
+          break;
+        }
+        case 'light': {
+          // Chain damage to 1 nearby mob
+          const chainDmg = damage * (t2 ? 0.45 : 0.30);
+          const nearby = remaining.filter(m => {
+            if (m === target) return false;
+            const dx = m.x - target.x;
+            const dy = m.y - target.y;
+            return Math.sqrt(dx * dx + dy * dy) <= 2;
+          });
+          if (nearby.length > 0) {
+            nearby[0].hp -= chainDmg;
+          }
+          break;
+        }
+        case 'nature': {
+          // Spawn temporary nature turret
+          const turrets = this.natureTurrets.get(player.id) || [];
+          turrets.push({
+            x: target.x,
+            y: target.y,
+            damage: damage * (t2 ? 0.7 : 0.5),
+            remaining: t2 ? 4000 : 3000,
+            attackCooldown: 0,
+          });
+          this.natureTurrets.set(player.id, turrets);
+          break;
+        }
+        case 'wind': {
+          // Knockback: push mobs back along path
+          const knockback = t2 ? 0.6 : 0.3;
+          for (const m of remaining) {
+            const dx = m.x - target.x;
+            const dy = m.y - target.y;
+            if (Math.sqrt(dx * dx + dy * dy) <= 1.5) {
+              // Push back along path
+              m.pathIndex = Math.max(0, m.pathIndex - 1);
+              const prevPoint = this.map.path[m.pathIndex];
+              const mdx = prevPoint.col - m.x;
+              const mdy = prevPoint.row - m.y;
+              const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+              if (mdist > 0.1) {
+                m.x += (mdx / mdist) * knockback;
+                m.y += (mdy / mdist) * knockback;
+              }
+            }
+          }
+          break;
+        }
+      }
+    }
   }
 
   /** Process one tick of combat for a player */
@@ -187,6 +402,8 @@ export class CombatManager {
     const remaining: MobInstance[] = [];
     const attacks: AttackEvent[] = [];
     const dt = dtMs / 1000;
+
+    const { element: playerElement, tier: elemTier } = this.getPlayerElement(player);
 
     // Move mobs
     for (const mob of mobs) {
@@ -202,11 +419,13 @@ export class CombatManager {
 
       let speed = baseSpeed;
       let frozen = false;
+      let stunned = false;
       for (const effect of mob.effects) {
         if (effect.type === 'slow') speed *= (1 - effect.value);
         if (effect.type === 'freeze') frozen = true;
+        if (effect.type === 'stun') stunned = true;
       }
-      if (frozen) speed = 0;
+      if (frozen || stunned) speed = 0;
       else speed = Math.max(speed, 0.2);
 
       const nextIdx = mob.pathIndex + 1;
@@ -252,7 +471,6 @@ export class CombatManager {
             mob.hp -= zone.dps * dt;
           }
           if (zone.slowPercent) {
-            // Apply slow if not already slowed by this zone
             const hasZoneSlow = mob.effects.some(e => e.type === 'slow' && e.value === zone.slowPercent! / 100);
             if (!hasZoneSlow) {
               mob.effects.push({ type: 'slow', remaining: 500, value: zone.slowPercent / 100 });
@@ -268,6 +486,32 @@ export class CombatManager {
       }
     }
 
+    // Nature turrets
+    const turrets = this.natureTurrets.get(player.id) || [];
+    for (const turret of turrets) {
+      turret.remaining -= dtMs;
+      turret.attackCooldown -= dtMs;
+      if (turret.attackCooldown <= 0 && remaining.length > 0) {
+        // Find nearest mob
+        let nearest: MobInstance | null = null;
+        let nearestDist = Infinity;
+        for (const m of remaining) {
+          const dx = m.x - turret.x;
+          const dy = m.y - turret.y;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < nearestDist && d <= 2.5) {
+            nearest = m;
+            nearestDist = d;
+          }
+        }
+        if (nearest) {
+          nearest.hp -= turret.damage * dt * 2; // pulsing damage
+          turret.attackCooldown = 500;
+        }
+      }
+    }
+    this.natureTurrets.set(player.id, turrets.filter(t => t.remaining > 0));
+
     // Tower attacks (only arrow and cannon towers attack)
     for (const tower of player.towers) {
       const def = TOWER_MAP[tower.defId];
@@ -280,7 +524,7 @@ export class CombatManager {
         continue;
       }
 
-      const towerStats = getTowerStats(def, tower.stars, player.augments);
+      const towerStats = getTowerStats(def, tower.stars, player.augments, playerElement, elemTier);
       
       // Find target in range
       const inRange = remaining.filter((m) => {
@@ -294,7 +538,29 @@ export class CombatManager {
       inRange.sort((a, b) => b.pathIndex - a.pathIndex);
       const target = inRange[0];
 
-      const finalDamage = towerStats.damage;
+      // Calculate damage with element multiplier
+      let finalDamage = towerStats.damage;
+      
+      // Element multiplier
+      const elemMult = getElementMultiplier(playerElement, target.element);
+      finalDamage *= elemMult;
+
+      // Armor reduction from dark cannon
+      const armorReduce = target.effects
+        .filter(e => e.type === 'armorReduce')
+        .reduce((sum, e) => sum + e.value, 0);
+      if (armorReduce > 0) {
+        finalDamage *= (1 + Math.min(armorReduce, 0.5)); // cap at 50% bonus
+      }
+
+      // Light Arrow: consecutive hit bonus
+      if (playerElement === 'light' && def.towerType === 'arrow') {
+        const towerHits = this.consecutiveHits.get(tower.instanceId);
+        const hits = towerHits?.get(target.instanceId) || 0;
+        const bonus = elemTier >= 2 ? 0.08 : 0.05;
+        finalDamage *= (1 + hits * bonus);
+      }
+
       target.hp -= finalDamage;
 
       // Splash damage for cannons
@@ -307,14 +573,23 @@ export class CombatManager {
           return Math.sqrt(dx * dx + dy * dy) <= splashRadius;
         });
         for (const st of splashTargets) {
-          st.hp -= finalDamage * 0.5;
+          let splashDmg = finalDamage * 0.5;
+          // Element multiplier for splash targets too
+          const stMult = getElementMultiplier(playerElement, st.element);
+          splashDmg = (towerStats.damage * 0.5) * stMult;
+          st.hp -= splashDmg;
         }
       }
+
+      // Apply elemental effects
+      this.applyElementalEffects(tower, target, playerElement, elemTier, finalDamage, remaining, player);
 
       // Set cooldown
       if (towerStats.attackSpeed > 0) {
         this.cooldowns.set(tower.instanceId, 1000 / towerStats.attackSpeed);
       }
+
+      const effectiveness = getEffectiveness(playerElement, target.element);
 
       attacks.push({
         towerId: tower.instanceId,
@@ -325,6 +600,9 @@ export class CombatManager {
         targetY: target.y,
         damage: finalDamage,
         element: def.towerType,
+        towerElement: playerElement,
+        mobElement: target.element,
+        effectiveness,
         splash: !!(splashRadius && splashRadius > 0),
       });
 
@@ -333,6 +611,10 @@ export class CombatManager {
         if (idx >= 0) {
           remaining.splice(idx, 1);
           killed.push(target);
+        }
+        // Clear consecutive hits for this target
+        for (const [, hitMap] of this.consecutiveHits) {
+          hitMap.delete(target.instanceId);
         }
       }
     }
