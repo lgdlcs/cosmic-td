@@ -27,15 +27,15 @@ export class LobbyScene extends Phaser.Scene {
     const cx = this.cameras.main.centerX;
 
     // Title
-    this.add.text(cx, 60, '⚔️ Element Chess TD', {
+    this.add.text(cx, 60, '🚀 COSMIC TD', {
       fontSize: '36px',
-      color: '#FFD93D',
+      color: '#00d4ff',
       fontStyle: 'bold',
     }).setOrigin(0.5);
 
-    this.add.text(cx, 110, 'Auto-Chess × Tower Defense', {
+    this.add.text(cx, 110, 'Auto-Chess × Tower Defense — In Space', {
       fontSize: '16px',
-      color: '#888',
+      color: '#7a8aaa',
     }).setOrigin(0.5);
 
     // Name input
@@ -50,12 +50,12 @@ export class LobbyScene extends Phaser.Scene {
 
     // Buttons
     this.createButton(cx - 80, 290, 'Join / Create', () => this.joinLobby());
-    this.createButton(cx + 80, 290, 'Ready', () => this.toggleReady());
+    this.createButton(cx + 80, 290, 'Launch Game', () => this.toggleReady());
 
     // Room code display
     this.roomCodeText = this.add.text(cx, 350, '', {
       fontSize: '24px',
-      color: '#4EA8DE',
+      color: '#00d4ff',
       fontStyle: 'bold',
     }).setOrigin(0.5);
 
@@ -81,12 +81,12 @@ export class LobbyScene extends Phaser.Scene {
     socket.clearHandlers();
     const handler = (msg: ServerMsg) => this.handleMsg(msg);
 
-    this.statusText.setText('🔄 Connecting...').setColor('#4EA8DE');
+    this.statusText.setText('🔄 Connecting to Space Station...').setColor('#00d4ff');
     socket.reconnect().then(() => {
       socket.onMessage(handler);
-      this.statusText.setText('✅ Connected - Enter name and join').setColor('#4AD97A');
+      this.statusText.setText('✅ Connected — Enter name and launch').setColor('#00ff88');
     }).catch(() => {
-      this.statusText.setText('❌ Cannot connect to server').setColor('#ff6b6b');
+      this.statusText.setText('❌ Cannot connect to Space Station').setColor('#ff4444');
     });
   }
 
@@ -137,12 +137,12 @@ export class LobbyScene extends Phaser.Scene {
     const panel = document.createElement('div');
     panel.style.cssText = `
       position: absolute; right: 20px; top: 180px; width: 220px;
-      background: rgba(15,52,96,0.95); border: 1px solid #4EA8DE; border-radius: 8px;
+      background: rgba(13,17,23,0.95); border: 1px solid #00d4ff; border-radius: 8px;
       padding: 14px; font-family: inherit; color: #eee; font-size: 13px;
       display: none; z-index: 10;
     `;
 
-    panel.innerHTML = '<div style="font-weight:bold;color:#FFD93D;margin-bottom:10px;font-size:14px">⚙️ Game Settings</div>';
+    panel.innerHTML = '<div style="font-weight:bold;color:#00d4ff;margin-bottom:10px;font-size:14px">⚙️ Station Settings</div>';
 
     const settings: { key: keyof GameConfig; label: string; min: number; max: number; step: number }[] = [
       { key: 'startingGold', label: '💰 Starting Gold', min: 0, max: 500, step: 10 },
@@ -163,7 +163,7 @@ export class LobbyScene extends Phaser.Scene {
       label.style.fontSize = '12px';
 
       const valueLabel = document.createElement('span');
-      valueLabel.style.cssText = 'color:#FFD93D;font-weight:bold;font-size:12px;';
+      valueLabel.style.cssText = 'color:#ffc107;font-weight:bold;font-size:12px;';
       valueLabel.textContent = String(this.config[s.key]);
 
       labelRow.appendChild(label);
@@ -175,7 +175,7 @@ export class LobbyScene extends Phaser.Scene {
       input.max = String(s.max);
       input.step = String(s.step);
       input.value = String(this.config[s.key]);
-      input.style.cssText = 'width:100%;accent-color:#FFD93D;';
+      input.style.cssText = 'width:100%;accent-color:#00d4ff;';
 
       input.addEventListener('input', () => {
         valueLabel.textContent = input.value;
@@ -219,8 +219,8 @@ export class LobbyScene extends Phaser.Scene {
 
     const note = this.configContainer.querySelector('.host-note') as HTMLElement;
     if (note) {
-      note.textContent = this.isHost ? '👑 You are the host' : 'Only the host can change settings';
-      note.style.color = this.isHost ? '#FFD93D' : '#888';
+      note.textContent = this.isHost ? '👑 You are the commander' : 'Only the commander can change settings';
+      note.style.color = this.isHost ? '#ffc107' : '#7a8aaa';
     }
   }
 
@@ -244,7 +244,7 @@ export class LobbyScene extends Phaser.Scene {
     input.placeholder = placeholder;
     input.style.cssText = `
       position: absolute; left: ${x}px; top: ${y}px; width: ${width}px;
-      background: #0f3460; color: #eee; border: 1px solid #4EA8DE;
+      background: #0d1117; color: #e0e8ff; border: 1px solid #00d4ff;
       padding: 6px 10px; border-radius: 4px; font-size: 14px;
       font-family: inherit; outline: none; z-index: 10;
     `;
@@ -256,8 +256,8 @@ export class LobbyScene extends Phaser.Scene {
   private createButton(x: number, y: number, label: string, onClick: () => void) {
     this.add.text(x, y, label, {
       fontSize: '16px',
-      color: '#1a1a2e',
-      backgroundColor: '#FFD93D',
+      color: '#0a0a14',
+      backgroundColor: '#00d4ff',
       padding: { x: 14, y: 8 },
     })
       .setOrigin(0.5)

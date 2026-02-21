@@ -60,7 +60,7 @@ export interface ZonePlacement {
   slowPercent?: number;
 }
 
-/** Temporary nature turret spawned by Nature Cannon */
+/** Temporary bio-turret spawned by Bio Railgun */
 interface NatureTurret {
   x: number;
   y: number;
@@ -101,7 +101,7 @@ export class CombatManager {
     const zones: ZonePlacement[] = [];
     const pathMid = Math.floor(this.map.path.length / 2);
     
-    const fireZoneMultiplier = player.augments.includes('FIRE_STORM') ? 3 : 1;
+    const solarZoneMultiplier = player.augments.includes('FIRE_STORM') ? 3 : 1;
     const { element: playerElem } = this.getPlayerElement(player);
 
     let zoneIndex = 0;
@@ -113,15 +113,15 @@ export class CombatManager {
         const pathOffset = pathMid + zoneIndex * 5;
         const pathPoint = this.map.path[Math.min(pathOffset, this.map.path.length - 1)];
         
-        if (aug.effect.element === 'fire') {
+        if (aug.effect.element === 'solar') {
           zones.push({
             augmentId: augId,
             x: pathPoint.col,
             y: pathPoint.row,
             radius: aug.effect.radius,
-            dps: aug.effect.dps * fireZoneMultiplier,
+            dps: aug.effect.dps * solarZoneMultiplier,
           });
-        } else if (aug.effect.element === 'water') {
+        } else if (aug.effect.element === 'cryo') {
           zones.push({
             augmentId: augId,
             x: pathPoint.col,
@@ -139,12 +139,12 @@ export class CombatManager {
             slowPercent: aug.effect.slowPercent,
           };
           // Upgrade zone based on player element
-          if (playerElem === 'fire') {
+          if (playerElem === 'solar') {
             zone.dps = 8;
             zone.slowPercent = undefined;
-          } else if (playerElem === 'water') {
+          } else if (playerElem === 'cryo') {
             zone.slowPercent = 30;
-          } else if (playerElem === 'earth') {
+          } else if (playerElem === 'asteroid') {
             zone.radius = aug.effect.radius * 1.5;
           }
           zones.push(zone);
@@ -258,37 +258,37 @@ export class CombatManager {
 
     if (def.towerType === 'arrow') {
       switch (towerElement) {
-        case 'fire': {
-          // Burn DoT
+        case 'solar': {
+          // Plasma burn DoT
           const dps = t2 ? 5 : 3;
           const dur = t2 ? 2500 : 2000;
           target.effects.push({ type: 'burn', remaining: dur, value: dps });
           break;
         }
-        case 'water': {
-          // Slow
+        case 'cryo': {
+          // Freeze ray slow
           const slow = t2 ? 0.30 : 0.20;
           const dur = t2 ? 1500 : 1000;
           target.effects.push({ type: 'slow', remaining: dur, value: slow });
           break;
         }
-        case 'earth': {
-          // Stun chance
+        case 'asteroid': {
+          // Shrapnel stun chance
           const chance = t2 ? 0.15 : 0.10;
           if (Math.random() < chance) {
             target.effects.push({ type: 'stun', remaining: 500, value: 1 });
           }
           break;
         }
-        case 'dark': {
-          // Poison DoT (stacks)
+        case 'void': {
+          // Entropy poison DoT (stacks)
           const dps = t2 ? 3 : 2;
           const dur = t2 ? 4000 : 3000;
           target.effects.push({ type: 'poison', remaining: dur, value: dps });
           break;
         }
-        case 'light': {
-          // Consecutive hit bonus — tracked externally
+        case 'photon': {
+          // Photon cascade — consecutive hit bonus tracked externally
           const towerHits = this.consecutiveHits.get(tower.instanceId) || new Map();
           const hits = (towerHits.get(target.instanceId) || 0) + 1;
           towerHits.set(target.instanceId, hits);
@@ -296,21 +296,21 @@ export class CombatManager {
           // Bonus already applied in damage calc
           break;
         }
-        case 'nature': {
-          // Entangle (slow)
+        case 'bio': {
+          // Spore entangle (slow)
           const slow = t2 ? 0.40 : 0.30;
           target.effects.push({ type: 'slow', remaining: 500, value: slow });
           break;
         }
-        case 'wind': {
-          // Attack speed bonus handled in getTowerStats
+        case 'nebula': {
+          // Ionized shots — attack speed bonus handled in getTowerStats
           break;
         }
       }
     } else if (def.towerType === 'cannon') {
       switch (towerElement) {
-        case 'fire': {
-          // Fire patch — apply burn to all in splash
+        case 'solar': {
+          // Solar flare AoE — apply burn to all in splash
           const dps = t2 ? 4 : 2;
           for (const m of remaining) {
             const dx = m.x - target.x;
@@ -321,8 +321,8 @@ export class CombatManager {
           }
           break;
         }
-        case 'water': {
-          // Frost zone — slow all in splash
+        case 'cryo': {
+          // Ice nova zone — slow all in splash
           const slow = t2 ? 0.35 : 0.25;
           for (const m of remaining) {
             const dx = m.x - target.x;
@@ -333,18 +333,18 @@ export class CombatManager {
           }
           break;
         }
-        case 'earth': {
-          // Splash radius bonus handled in getTowerStats
+        case 'asteroid': {
+          // Meteor impact — splash radius bonus handled in getTowerStats
           break;
         }
-        case 'dark': {
-          // Armor reduce
+        case 'void': {
+          // Gravity well — armor reduction
           const reduction = t2 ? 0.25 : 0.15;
           target.effects.push({ type: 'armorReduce', remaining: 3000, value: reduction });
           break;
         }
-        case 'light': {
-          // Chain damage to 1 nearby mob
+        case 'photon': {
+          // Beam split — chain damage to 1 nearby mob
           const chainDmg = damage * (t2 ? 0.45 : 0.30);
           const nearby = remaining.filter(m => {
             if (m === target) return false;
@@ -357,8 +357,8 @@ export class CombatManager {
           }
           break;
         }
-        case 'nature': {
-          // Spawn temporary nature turret
+        case 'bio': {
+          // Spawn bio-turret
           const turrets = this.natureTurrets.get(player.id) || [];
           turrets.push({
             x: target.x,
@@ -370,8 +370,8 @@ export class CombatManager {
           this.natureTurrets.set(player.id, turrets);
           break;
         }
-        case 'wind': {
-          // Knockback: push mobs back along path
+        case 'nebula': {
+          // Shockwave knockback: push mobs back along path
           const knockback = t2 ? 0.6 : 0.3;
           for (const m of remaining) {
             const dx = m.x - target.x;
@@ -553,8 +553,8 @@ export class CombatManager {
         finalDamage *= (1 + Math.min(armorReduce, 0.5)); // cap at 50% bonus
       }
 
-      // Light Arrow: consecutive hit bonus
-      if (playerElement === 'light' && def.towerType === 'arrow') {
+      // Photon Blaster: photon cascade consecutive hit bonus
+      if (playerElement === 'photon' && def.towerType === 'arrow') {
         const towerHits = this.consecutiveHits.get(tower.instanceId);
         const hits = towerHits?.get(target.instanceId) || 0;
         const bonus = elemTier >= 2 ? 0.08 : 0.05;

@@ -282,7 +282,7 @@ export class GameScene extends Phaser.Scene {
           this.hideAugmentOverlay();
           this.showPhaseFlash(`🛒 ROUND ${msg.round}`);
         } else if (msg.phase === 'augmentPick') {
-          this.showPhaseFlash('✨ AUGMENT PICK');
+          this.showPhaseFlash('🔬 CHOOSE YOUR TECHNOLOGY');
         }
         break;
 
@@ -358,7 +358,7 @@ export class GameScene extends Phaser.Scene {
     this.augmentOverlay.add(backdrop);
     
     // Title
-    const title = this.add.text(cx, cy - 180, `✨ Choose Your Augment — Round ${this.gameState.round}`, {
+    const title = this.add.text(cx, cy - 180, `🔬 CHOOSE YOUR TECHNOLOGY — Round ${this.gameState.round}`, {
       fontSize: '24px', color: '#FFD93D', fontStyle: 'bold',
       stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5);
@@ -687,10 +687,10 @@ export class GameScene extends Phaser.Scene {
   private drawGrid() {
     const g = this.gridGfx;
     g.clear();
-    const me = this.me();
-    const tintRGB = Phaser.Display.Color.HexStringToColor(
-      me ? PLAYER_COLOR_HEX[me.color] : '#4A90D9'
-    );
+
+    // Deep space background
+    g.fillStyle(0x0a0a14, 1);
+    g.fillRect(GRID_X - 2, GRID_Y - 2, GRID_PX + 4, GRID_PX + 4);
 
     for (let row = 0; row < GRID_SIZE; row++) {
       for (let col = 0; col < GRID_SIZE; col++) {
@@ -698,20 +698,26 @@ export class GameScene extends Phaser.Scene {
         const y = GRID_Y + row * CELL;
         const onPath = isPathCell(this.mapDef, { row, col });
         if (onPath) {
-          g.fillStyle(0x2a2a4a, 1);
+          // Metallic dark path with subtle glow edges
+          g.fillStyle(0x15152a, 1);
+          g.fillRect(x, y, CELL, CELL);
+          g.lineStyle(1, 0x00d4ff, 0.08);
+          g.strokeRect(x + 1, y + 1, CELL - 2, CELL - 2);
         } else {
-          const base = new Phaser.Display.Color(28, 28, 54);
-          const blended = Phaser.Display.Color.Interpolate.ColorWithColor(base, tintRGB, 100, 8);
-          g.fillStyle(Phaser.Display.Color.GetColor(blended.r, blended.g, blended.b), 1);
+          // Placeable tiles - slightly lighter with grid dots
+          g.fillStyle(0x0e0e20, 1);
+          g.fillRect(x, y, CELL, CELL);
+          // Grid dot
+          g.fillStyle(0x2a2a4a, 0.4);
+          g.fillCircle(x + CELL / 2, y + CELL / 2, 1);
         }
-        g.fillRect(x, y, CELL, CELL);
-        g.lineStyle(1, 0x333366, 0.4);
+        g.lineStyle(1, 0x1a1a3a, 0.5);
         g.strokeRect(x, y, CELL, CELL);
       }
     }
 
-    // Path lines
-    g.lineStyle(2, 0x4EA8DE, 0.25);
+    // Path lines - subtle cyan glow
+    g.lineStyle(2, 0x00d4ff, 0.15);
     for (let i = 0; i < this.mapDef.path.length - 1; i++) {
       const a = this.mapDef.path[i];
       const b = this.mapDef.path[i + 1];
@@ -721,13 +727,28 @@ export class GameScene extends Phaser.Scene {
       );
     }
 
+    // Starfield overlay
+    for (let i = 0; i < 80; i++) {
+      const sx = GRID_X + Math.random() * GRID_PX;
+      const sy = GRID_Y + Math.random() * GRID_PX;
+      const brightness = 0.15 + Math.random() * 0.35;
+      g.fillStyle(0xffffff, brightness);
+      g.fillCircle(sx, sy, Math.random() < 0.3 ? 1.5 : 0.8);
+    }
+
+    // Nebula glow patches
+    g.fillStyle(0x7b2fbe, 0.03);
+    g.fillCircle(GRID_X + GRID_PX * 0.3, GRID_Y + GRID_PX * 0.2, 60);
+    g.fillStyle(0x00d4ff, 0.02);
+    g.fillCircle(GRID_X + GRID_PX * 0.7, GRID_Y + GRID_PX * 0.8, 80);
+
     const entry = this.mapDef.entry;
     const exit = this.mapDef.exit;
     this.add.text(GRID_X + entry.col * CELL + 8, GRID_Y + entry.row * CELL + 22, '▶ IN', {
-      fontSize: '12px', color: '#4AD97A', fontStyle: 'bold',
+      fontSize: '12px', color: '#00ff88', fontStyle: 'bold',
     }).setDepth(0);
     this.add.text(GRID_X + exit.col * CELL + 4, GRID_Y + exit.row * CELL + 22, '✕ EXIT', {
-      fontSize: '11px', color: '#D94A4A', fontStyle: 'bold',
+      fontSize: '11px', color: '#ff4444', fontStyle: 'bold',
     }).setDepth(0);
   }
 
@@ -932,8 +953,8 @@ export class GameScene extends Phaser.Scene {
     const cx = GRID_X + GRID_PX / 2;
     const cy = GRID_Y + GRID_PX / 2;
     const flash = this.add.text(cx, cy, text, {
-      fontSize: '40px', color: '#FFD93D', fontStyle: 'bold',
-      stroke: '#000', strokeThickness: 4,
+      fontSize: '40px', color: '#00d4ff', fontStyle: 'bold',
+      stroke: '#7b2fbe', strokeThickness: 4,
     }).setOrigin(0.5).setDepth(10).setAlpha(1);
 
     this.tweens.add({
@@ -952,8 +973,8 @@ export class GameScene extends Phaser.Scene {
       const s = speeds[i];
       const active = s === this.currentSpeed;
       btn.setStyle({
-        color: active ? '#1a1a2e' : '#ccc',
-        backgroundColor: active ? '#FFD93D' : '#2a2a3e',
+        color: active ? '#0a0a14' : '#7a8aaa',
+        backgroundColor: active ? '#00d4ff' : '#12122a',
       });
     });
   }
@@ -965,11 +986,11 @@ export class GameScene extends Phaser.Scene {
 
     // Top bar
     this.uiTopLeft = this.add.text(GRID_X, 10, '', {
-      fontSize: '15px', color: '#FFD93D', fontStyle: 'bold',
+      fontSize: '15px', color: '#ffc107', fontStyle: 'bold',
     }).setDepth(5);
 
     this.uiTopRight = this.add.text(GRID_X + GRID_PX - 40, 10, '', {
-      fontSize: '15px', color: '#4EA8DE',
+      fontSize: '15px', color: '#00d4ff',
     }).setOrigin(1, 0).setDepth(5);
 
     // Mute button
@@ -990,8 +1011,8 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < 3; i++) {
       this.uiOpponents.push(
         this.add.text(10, GRID_Y + i * 70, '', {
-          fontSize: '13px', color: '#ccc',
-          backgroundColor: '#0f3460',
+          fontSize: '13px', color: '#e0e8ff',
+          backgroundColor: '#0d1117cc',
           padding: { x: 8, y: 6 },
           fixedWidth: 185,
           wordWrap: { width: 175 },
@@ -1001,23 +1022,23 @@ export class GameScene extends Phaser.Scene {
 
     // Augment list (right sidebar)
     this.uiAugmentList = this.add.text(GRID_X + GRID_PX + 10, GRID_Y, '', {
-      fontSize: '12px', color: '#ccc',
-      backgroundColor: '#1a1a2e',
+      fontSize: '12px', color: '#e0e8ff',
+      backgroundColor: '#0d1117cc',
       padding: { x: 8, y: 6 },
       wordWrap: { width: 170 },
       lineSpacing: 4,
     }).setDepth(5);
 
     // Shop
-    this.add.text(GRID_X, shopY - 2, 'SHOP — Buy 3 of same type → ★ upgrade', {
+    this.add.text(GRID_X, shopY - 2, 'SPACE STATION — Buy 3 of same type → ★ upgrade', {
       fontSize: '11px', color: '#666', fontStyle: 'bold',
     }).setDepth(5);
 
     for (let i = 0; i < 5; i++) {
       const x = GRID_X + i * 104;
       const txt = this.add.text(x, shopY + 14, '', {
-        fontSize: '12px', color: '#eee',
-        backgroundColor: '#0f3460',
+        fontSize: '12px', color: '#e0e8ff',
+        backgroundColor: '#0d1117cc',
         padding: { x: 6, y: 5 },
         fixedWidth: 98,
         wordWrap: { width: 90 },
@@ -1031,13 +1052,13 @@ export class GameScene extends Phaser.Scene {
     // Buttons
     const btnX = GRID_X + 5 * 104 + 8;
     this.add.text(btnX, shopY + 14, '🔄 Reroll 2g', {
-      fontSize: '13px', color: '#1a1a2e', backgroundColor: '#FFD93D',
+      fontSize: '13px', color: '#0a0a14', backgroundColor: '#ffc107',
       padding: { x: 8, y: 8 },
     }).setDepth(5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => socket.send({ type: 'REROLL' }));
 
     this.add.text(btnX, shopY + 86, '▶ SEND WAVE', {
-      fontSize: '13px', color: '#1a1a2e', backgroundColor: '#D94A4A',
+      fontSize: '13px', color: '#e0e8ff', backgroundColor: '#ff4444',
       padding: { x: 8, y: 8 },
     }).setDepth(5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => socket.send({ type: 'DEV_START_COMBAT' }));
@@ -1050,8 +1071,8 @@ export class GameScene extends Phaser.Scene {
     speeds.forEach((s, i) => {
       const btn = this.add.text(speedStartX + i * 34, speedY, `×${s}`, {
         fontSize: '12px',
-        color: s === 1 ? '#1a1a2e' : '#ccc',
-        backgroundColor: s === 1 ? '#FFD93D' : '#2a2a3e',
+        color: s === 1 ? '#0a0a14' : '#7a8aaa',
+        backgroundColor: s === 1 ? '#00d4ff' : '#12122a',
         padding: { x: 5, y: 4 },
       }).setDepth(5).setInteractive({ useHandCursor: true })
         .on('pointerdown', () => socket.send({ type: 'SET_SPEED', speed: s }));
@@ -1066,9 +1087,9 @@ export class GameScene extends Phaser.Scene {
     // Tower hover tooltip
     this.uiTowerHoverInfo = this.add.text(0, 0, '', {
       fontSize: '12px', color: '#ffffff',
-      backgroundColor: '#1a1a2e',
+      backgroundColor: '#0d1117cc',
       padding: { x: 8, y: 6 },
-      stroke: '#ffd93d', strokeThickness: 1,
+      stroke: '#00d4ff', strokeThickness: 1,
       fixedWidth: 240,
       wordWrap: { width: 220 },
     }).setOrigin(0, 0).setDepth(10);
@@ -1089,14 +1110,14 @@ export class GameScene extends Phaser.Scene {
       if (defId) {
         const def = TOWER_MAP[defId];
         if (def) {
-          const emoji: Record<string, string> = { arrow: '🏹', cannon: '💣', income: '💰', pvp: '👹' };
+          const emoji: Record<string, string> = { arrow: '🔫', cannon: '🔧', income: '⛏️', pvp: '🌀' };
           const displayText = `${emoji[def.towerType] || ''} ${def.name}\n${def.cost}g`;
-          const textColor = isSelected ? '#ffd93d' : '#eee';
-          const bgColor = isSelected ? '#4a4a0a' : '#0f3460';
+          const textColor = isSelected ? '#ffc107' : '#e0e8ff';
+          const bgColor = isSelected ? '#2a2a0a' : '#0d1117cc';
           this.uiShopSlots[i].setText(displayText).setColor(textColor).setBackgroundColor(bgColor);
         }
       } else {
-        this.uiShopSlots[i].setText('  — empty —').setColor('#444').setBackgroundColor('#0f3460');
+        this.uiShopSlots[i].setText('  — empty —').setColor('#444').setBackgroundColor('#0d1117cc');
       }
     }
 

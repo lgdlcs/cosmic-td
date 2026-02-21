@@ -38,4 +38,4 @@ wss.on('connection', (ws) => {
   });
 });
 
-console.log(`🎮 Element Chess TD server on ws://localhost:${PORT}`);
+console.log(`🚀 Cosmic TD server on ws://localhost:${PORT}`);

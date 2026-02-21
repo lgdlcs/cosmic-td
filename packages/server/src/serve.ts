@@ -73,5 +73,5 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`🎮 Element Chess TD running on http://localhost:${PORT}`);
+  console.log(`🚀 Cosmic TD running on http://localhost:${PORT}`);
 });

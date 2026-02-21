@@ -7,45 +7,45 @@ import { ELEMENT_COLOR } from './elements.js';
 export const TOWER_DEFS: TowerDef[] = [
   {
     id: 'arrow',
-    name: 'Arrow Tower',
+    name: 'Blaster',
     towerType: 'arrow',
     cost: 3,
     damage: 8,
     attackSpeed: 1.25,  // 1/0.8
     range: 3,
-    description: 'Fast attacks, low damage',
+    description: 'Rapid fire laser shots',
   },
   {
     id: 'cannon',
-    name: 'Cannon',
+    name: 'Railgun',
     towerType: 'cannon',
     cost: 5,
     damage: 25,
     attackSpeed: 0.5,  // 1/2.0
     range: 2.5,
-    description: 'Slow, high damage, small splash',
+    description: 'Slow, massive kinetic impact',
     splashRadius: 0.5,
   },
   {
     id: 'income',
-    name: 'Gold Mine',
+    name: 'Mining Probe',
     towerType: 'income',
     cost: 7,
     damage: 0,
     attackSpeed: 0,
     range: 0,
-    description: 'Generates +2 gold per round',
+    description: 'Extracts +2 credits per round',
     incomePerRound: 2,
   },
   {
     id: 'pvp',
-    name: 'Monster Pit',
+    name: 'Warp Gate',
     towerType: 'pvp',
     cost: 6,
     damage: 0,
     attackSpeed: 0,
     range: 0,
-    description: 'Sends a mob to opponent each round',
+    description: 'Warps an alien mob to opponent each round',
     mobPower: 1.0,
   },
 ];
@@ -103,16 +103,16 @@ export function getTowerStats(
     }
   }
 
-  // Wind element: +25% attack speed for arrows (tier 2: +40%)
-  if (element === 'wind' && def.towerType === 'arrow') {
-    const windBonus = (elementTier || 1) >= 2 ? 1.4 : 1.25;
-    attackSpeed *= windBonus;
+  // Nebula element: +25% attack speed for blasters (tier 2: +40%)
+  if (element === 'nebula' && def.towerType === 'arrow') {
+    const nebulaBonus = (elementTier || 1) >= 2 ? 1.4 : 1.25;
+    attackSpeed *= nebulaBonus;
   }
 
-  // Earth element: +30% splash radius for cannons (tier 2: +50%)
-  if (element === 'earth' && def.towerType === 'cannon' && splashRadius) {
-    const earthBonus = (elementTier || 1) >= 2 ? 1.5 : 1.3;
-    splashRadius *= earthBonus;
+  // Asteroid element: +30% splash radius for railguns (tier 2: +50%)
+  if (element === 'asteroid' && def.towerType === 'cannon' && splashRadius) {
+    const asteroidBonus = (elementTier || 1) >= 2 ? 1.5 : 1.3;
+    splashRadius *= asteroidBonus;
   }
 
   const starLabel = stars >= 1 ? ' ★' : '';

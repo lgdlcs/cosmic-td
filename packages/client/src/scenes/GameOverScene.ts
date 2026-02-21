@@ -26,7 +26,7 @@ export class GameOverScene extends Phaser.Scene {
     // Title
     this.add.text(cx, cy - 120, isMe ? '🏆 VICTORY!' : '💀 DEFEAT', {
       fontSize: '48px',
-      color: isMe ? '#FFD93D' : '#ff4444',
+      color: isMe ? '#00d4ff' : '#ff4444',
       fontStyle: 'bold',
     }).setOrigin(0.5);
 
@@ -59,8 +59,8 @@ export class GameOverScene extends Phaser.Scene {
     // Play Again button
     this.add.text(cx, cy + 200, '🔄 Play Again', {
       fontSize: '20px',
-      color: '#1a1a2e',
-      backgroundColor: '#FFD93D',
+      color: '#0a0a14',
+      backgroundColor: '#00d4ff',
       padding: { x: 20, y: 10 },
     })
       .setOrigin(0.5)

@@ -1,61 +1,61 @@
 // ── Element System ──────────────────────────────────────
 
-export type Element = 'fire' | 'water' | 'earth' | 'dark' | 'light' | 'nature' | 'wind';
+export type Element = 'solar' | 'cryo' | 'asteroid' | 'void' | 'photon' | 'bio' | 'nebula';
 
-export const ALL_ELEMENTS: Element[] = ['fire', 'water', 'earth', 'dark', 'light', 'nature', 'wind'];
+export const ALL_ELEMENTS: Element[] = ['solar', 'cryo', 'asteroid', 'void', 'photon', 'bio', 'nebula'];
 
 export const ELEMENT_EMOJI: Record<Element, string> = {
-  fire: '🔥',
-  water: '💧',
-  earth: '🌍',
-  dark: '🌑',
-  light: '☀️',
-  nature: '🌿',
-  wind: '💨',
+  solar: '☀️',
+  cryo: '🧊',
+  asteroid: '🪨',
+  void: '🕳️',
+  photon: '⚡',
+  bio: '🧬',
+  nebula: '🌀',
 };
 
 export const ELEMENT_COLOR: Record<Element, string> = {
-  fire: '#FF4422',
-  water: '#4488FF',
-  earth: '#AA8844',
-  dark: '#8844AA',
-  light: '#FFDD44',
-  nature: '#44CC44',
-  wind: '#88CCCC',
+  solar: '#FF6B00',
+  cryo: '#00D4FF',
+  asteroid: '#8B7355',
+  void: '#7B2FBE',
+  photon: '#FFE500',
+  bio: '#00FF88',
+  nebula: '#FF69B4',
 };
 
 export const ELEMENT_COLOR_HEX: Record<Element, number> = {
-  fire: 0xFF4422,
-  water: 0x4488FF,
-  earth: 0xAA8844,
-  dark: 0x8844AA,
-  light: 0xFFDD44,
-  nature: 0x44CC44,
-  wind: 0x88CCCC,
+  solar: 0xFF6B00,
+  cryo: 0x00D4FF,
+  asteroid: 0x8B7355,
+  void: 0x7B2FBE,
+  photon: 0xFFE500,
+  bio: 0x00FF88,
+  nebula: 0xFF69B4,
 };
 
 // ── Weakness Table ──────────────────────────────────────
 
 /** Maps element → what it's strong against */
 const STRONG_VS: Record<Element, Element> = {
-  fire: 'nature',
-  water: 'fire',
-  earth: 'light',
-  dark: 'water',
-  light: 'dark',
-  nature: 'water',
-  wind: 'earth',
+  solar: 'bio',
+  cryo: 'solar',
+  asteroid: 'photon',
+  void: 'cryo',
+  photon: 'void',
+  bio: 'cryo',
+  nebula: 'asteroid',
 };
 
 /** Maps element → what it's weak against */
 const WEAK_VS: Record<Element, Element> = {
-  fire: 'water',
-  water: 'nature',
-  earth: 'dark',
-  dark: 'light',
-  light: 'earth',
-  nature: 'fire',
-  wind: 'nature',
+  solar: 'cryo',
+  cryo: 'bio',
+  asteroid: 'void',
+  void: 'photon',
+  photon: 'asteroid',
+  bio: 'solar',
+  nebula: 'bio',
 };
 
 export function isStrongAgainst(attacker: Element, defender: Element): boolean {
@@ -90,27 +90,27 @@ export interface ElementCombo {
 }
 
 export const ELEMENT_COMBOS: ElementCombo[] = [
-  { elements: ['fire', 'water'], name: 'Steam', emoji: '♨️' },
-  { elements: ['fire', 'earth'], name: 'Magma', emoji: '🌋' },
-  { elements: ['fire', 'wind'], name: 'Inferno', emoji: '🔥' },
-  { elements: ['fire', 'dark'], name: 'Hellfire', emoji: '👿' },
-  { elements: ['fire', 'light'], name: 'Solar', emoji: '🌞' },
-  { elements: ['fire', 'nature'], name: 'Wildfire', emoji: '🏕️' },
-  { elements: ['water', 'earth'], name: 'Mud', emoji: '🏺' },
-  { elements: ['water', 'wind'], name: 'Storm', emoji: '🌊' },
-  { elements: ['water', 'dark'], name: 'Abyss', emoji: '🕳️' },
-  { elements: ['water', 'light'], name: 'Ice', emoji: '❄️' },
-  { elements: ['water', 'nature'], name: 'Bloom', emoji: '🌸' },
-  { elements: ['earth', 'dark'], name: 'Void', emoji: '⬛' },
-  { elements: ['earth', 'light'], name: 'Crystal', emoji: '💎' },
-  { elements: ['earth', 'nature'], name: 'Forest', emoji: '🌲' },
-  { elements: ['earth', 'wind'], name: 'Dust', emoji: '🌪️' },
-  { elements: ['dark', 'light'], name: 'Eclipse', emoji: '🌓' },
-  { elements: ['dark', 'nature'], name: 'Decay', emoji: '🍂' },
-  { elements: ['dark', 'wind'], name: 'Shadow', emoji: '👤' },
-  { elements: ['light', 'nature'], name: 'Life', emoji: '🌱' },
-  { elements: ['light', 'wind'], name: 'Flash', emoji: '⚡' },
-  { elements: ['nature', 'wind'], name: 'Gale', emoji: '🍃' },
+  { elements: ['solar', 'cryo'], name: 'Plasma', emoji: '♨️' },
+  { elements: ['solar', 'asteroid'], name: 'Magma Core', emoji: '🌋' },
+  { elements: ['solar', 'nebula'], name: 'Supernova', emoji: '💥' },
+  { elements: ['solar', 'void'], name: 'Dark Star', emoji: '🌑' },
+  { elements: ['solar', 'photon'], name: 'Radiance', emoji: '🌞' },
+  { elements: ['solar', 'bio'], name: 'Photosynthesis', emoji: '🌱' },
+  { elements: ['cryo', 'asteroid'], name: 'Comet', emoji: '☄️' },
+  { elements: ['cryo', 'nebula'], name: 'Ice Storm', emoji: '🌊' },
+  { elements: ['cryo', 'void'], name: 'Absolute Zero', emoji: '🕳️' },
+  { elements: ['cryo', 'photon'], name: 'Prism', emoji: '❄️' },
+  { elements: ['cryo', 'bio'], name: 'Cryogenics', emoji: '🧪' },
+  { elements: ['asteroid', 'void'], name: 'Singularity', emoji: '⬛' },
+  { elements: ['asteroid', 'photon'], name: 'Crystal', emoji: '💎' },
+  { elements: ['asteroid', 'bio'], name: 'Terraform', emoji: '🌲' },
+  { elements: ['asteroid', 'nebula'], name: 'Dust Cloud', emoji: '🌪️' },
+  { elements: ['void', 'photon'], name: 'Eclipse', emoji: '🌓' },
+  { elements: ['void', 'bio'], name: 'Entropy', emoji: '🍂' },
+  { elements: ['void', 'nebula'], name: 'Dark Matter', emoji: '👤' },
+  { elements: ['photon', 'bio'], name: 'Genesis', emoji: '✨' },
+  { elements: ['photon', 'nebula'], name: 'Pulsar', emoji: '⚡' },
+  { elements: ['bio', 'nebula'], name: 'Spore Cloud', emoji: '🍃' },
 ];
 
 /** Find combo for two elements (order doesn't matter) */

@@ -4,8 +4,8 @@ import type { Element } from './elements.js';
 
 export type AugmentEffect =
   | { type: 'element'; element: Element }
-  | { type: 'zone'; element: 'fire'; dps: number; radius: number }
-  | { type: 'zone'; element: 'water'; slowPercent: number; radius: number }
+  | { type: 'zone'; element: 'solar'; dps: number; radius: number }
+  | { type: 'zone'; element: 'cryo'; slowPercent: number; radius: number }
   | { type: 'zone'; element: 'neutral'; slowPercent: number; radius: number }
   | { type: 'passive'; bonusGold: number }
   | { type: 'passive'; pvpMultiplier: number }
@@ -16,7 +16,7 @@ export type AugmentEffect =
   | { type: 'towerBuff'; towerType: 'arrow'; damageMultiplier: number }
   | { type: 'towerBuff'; towerType: 'cannon'; splashMultiplier: number }
   | { type: 'towerBuff'; towerType: 'income'; incomeMultiplier: number }
-  | { type: 'zoneMultiplier'; element: 'fire'; multiplier: number }
+  | { type: 'zoneMultiplier'; element: 'solar'; multiplier: number }
   | { type: 'wall' };
 
 export type AugmentCategory = 'element' | 'zone' | 'passive';
@@ -34,136 +34,136 @@ export interface Augment {
 export const AUGMENT_POOL: Augment[] = [
   // ── Element Augments (Tier 1+) ────────────────────────
   {
-    id: 'ELEM_FIRE', name: '🔥 Fire Element',
-    description: 'Arrows: burn DoT (3 dps/2s). Cannons: fire patch (2s). Strong vs Nature, weak vs Water.',
-    icon: '🔥', tier: 1, category: 'element',
-    effect: { type: 'element', element: 'fire' },
-  },
-  {
-    id: 'ELEM_WATER', name: '💧 Water Element',
-    description: 'Arrows: slow 20%/1s. Cannons: frost zone 25% slow. Strong vs Fire, weak vs Nature.',
-    icon: '💧', tier: 1, category: 'element',
-    effect: { type: 'element', element: 'water' },
-  },
-  {
-    id: 'ELEM_EARTH', name: '🌍 Earth Element',
-    description: 'Arrows: 10% stun (0.5s). Cannons: +30% splash. Strong vs Light, weak vs Dark.',
-    icon: '🌍', tier: 1, category: 'element',
-    effect: { type: 'element', element: 'earth' },
-  },
-  {
-    id: 'ELEM_DARK', name: '🌑 Dark Element',
-    description: 'Arrows: poison DoT (2 dps/3s, stacks). Cannons: -15% armor. Strong vs Water, weak vs Light.',
-    icon: '🌑', tier: 1, category: 'element',
-    effect: { type: 'element', element: 'dark' },
-  },
-  {
-    id: 'ELEM_LIGHT', name: '☀️ Light Element',
-    description: 'Arrows: +5% dmg per consecutive hit. Cannons: chain to 1 nearby (30%). Strong vs Dark, weak vs Earth.',
+    id: 'ELEM_FIRE', name: '☀️ Solar Element',
+    description: 'Blasters: plasma burn DoT (3 dps/2s). Railguns: solar flare AoE (2s). Strong vs Bio, weak vs Cryo.',
     icon: '☀️', tier: 1, category: 'element',
-    effect: { type: 'element', element: 'light' },
+    effect: { type: 'element', element: 'solar' },
   },
   {
-    id: 'ELEM_NATURE', name: '🌿 Nature Element',
-    description: 'Arrows: entangle (slow 30%/0.5s). Cannons: spawn temp turret (50% dmg/3s). Strong vs Water, weak vs Fire.',
-    icon: '🌿', tier: 1, category: 'element',
-    effect: { type: 'element', element: 'nature' },
+    id: 'ELEM_WATER', name: '🧊 Cryo Element',
+    description: 'Blasters: freeze ray slow 20%/1s. Railguns: ice nova zone 25% slow. Strong vs Solar, weak vs Bio.',
+    icon: '🧊', tier: 1, category: 'element',
+    effect: { type: 'element', element: 'cryo' },
   },
   {
-    id: 'ELEM_WIND', name: '💨 Wind Element',
-    description: 'Arrows: +25% attack speed. Cannons: knockback mobs. Strong vs Earth, weak vs Nature.',
-    icon: '💨', tier: 1, category: 'element',
-    effect: { type: 'element', element: 'wind' },
+    id: 'ELEM_EARTH', name: '🪨 Asteroid Element',
+    description: 'Blasters: 10% shrapnel stun (0.5s). Railguns: +30% meteor splash. Strong vs Photon, weak vs Void.',
+    icon: '🪨', tier: 1, category: 'element',
+    effect: { type: 'element', element: 'asteroid' },
+  },
+  {
+    id: 'ELEM_DARK', name: '🕳️ Void Element',
+    description: 'Blasters: entropy poison DoT (2 dps/3s, stacks). Railguns: gravity well -15% armor. Strong vs Cryo, weak vs Photon.',
+    icon: '🕳️', tier: 1, category: 'element',
+    effect: { type: 'element', element: 'void' },
+  },
+  {
+    id: 'ELEM_LIGHT', name: '⚡ Photon Element',
+    description: 'Blasters: +5% dmg per consecutive hit (photon cascade). Railguns: beam split to 1 nearby (30%). Strong vs Void, weak vs Asteroid.',
+    icon: '⚡', tier: 1, category: 'element',
+    effect: { type: 'element', element: 'photon' },
+  },
+  {
+    id: 'ELEM_NATURE', name: '🧬 Bio Element',
+    description: 'Blasters: spore entangle (slow 30%/0.5s). Railguns: spawn bio-turret (50% dmg/3s). Strong vs Cryo, weak vs Solar.',
+    icon: '🧬', tier: 1, category: 'element',
+    effect: { type: 'element', element: 'bio' },
+  },
+  {
+    id: 'ELEM_WIND', name: '🌀 Nebula Element',
+    description: 'Blasters: ionized shots +25% attack speed. Railguns: shockwave knockback. Strong vs Asteroid, weak vs Bio.',
+    icon: '🌀', tier: 1, category: 'element',
+    effect: { type: 'element', element: 'nebula' },
   },
 
   // ── Zone Augments ─────────────────────────────────────
   {
-    id: 'FIRE_ZONE', name: '🔥 Fire Zone',
-    description: 'Place a burning area that deals 5 dps to mobs passing through',
-    icon: '🔥', tier: 1, category: 'zone',
-    effect: { type: 'zone', element: 'fire', dps: 5, radius: 1.5 },
+    id: 'FIRE_ZONE', name: '☀️ Solar Flare Zone',
+    description: 'Deploy a solar flare zone that deals 5 dps to targets passing through',
+    icon: '☀️', tier: 1, category: 'zone',
+    effect: { type: 'zone', element: 'solar', dps: 5, radius: 1.5 },
   },
   {
-    id: 'WATER_ZONE', name: '💧 Frost Field',
-    description: 'Place a freezing area that slows mobs by 30%',
-    icon: '💧', tier: 1, category: 'zone',
-    effect: { type: 'zone', element: 'water', slowPercent: 30, radius: 1.5 },
+    id: 'WATER_ZONE', name: '🧊 Cryo Field',
+    description: 'Deploy a cryo field that slows targets by 30%',
+    icon: '🧊', tier: 1, category: 'zone',
+    effect: { type: 'zone', element: 'cryo', slowPercent: 30, radius: 1.5 },
   },
   {
-    id: 'ZONE_NEUTRAL', name: '⬜ Slow Zone',
-    description: 'Place a zone that slows mobs by 10% (upgrades with your element)',
+    id: 'ZONE_NEUTRAL', name: '⬜ Dampening Field',
+    description: 'Deploy a field that slows targets by 10% (upgrades with your element)',
     icon: '⬜', tier: 1, category: 'zone',
     effect: { type: 'zone', element: 'neutral', slowPercent: 10, radius: 1.5 },
   },
 
   // ── Passive Augments ──────────────────────────────────
   {
-    id: 'INCOME_BOOST', name: '💰 Tax Collector',
-    description: '+3 gold per round',
+    id: 'INCOME_BOOST', name: '💰 Mining Efficiency',
+    description: 'Mining efficiency upgrade: +3 credits per round',
     icon: '💰', tier: 1, category: 'passive',
     effect: { type: 'passive', bonusGold: 3 },
   },
   {
-    id: 'PVP_BOOST', name: '👹 War Chief',
-    description: 'PvP monsters send 25% stronger mobs',
+    id: 'PVP_BOOST', name: '👹 Warp Commander',
+    description: 'Warp gate reinforcements: 25% stronger alien mobs',
     icon: '👹', tier: 1, category: 'passive',
     effect: { type: 'passive', pvpMultiplier: 1.25 },
   },
   {
-    id: 'ARROW_MASTERY', name: '🏹 Sharp Tips',
-    description: 'Arrow towers deal +20% damage',
-    icon: '🏹', tier: 1, category: 'passive',
+    id: 'ARROW_MASTERY', name: '🔫 Overcharged Cells',
+    description: 'Blasters deal +20% damage',
+    icon: '🔫', tier: 1, category: 'passive',
     effect: { type: 'towerBuff', towerType: 'arrow', damageMultiplier: 1.2 },
   },
   {
-    id: 'CANNON_MASTERY', name: '💣 Big Bombs',
-    description: 'Cannon splash radius +50%',
+    id: 'CANNON_MASTERY', name: '💣 Expanded Payload',
+    description: 'Railgun splash radius +50%',
     icon: '💣', tier: 1, category: 'passive',
     effect: { type: 'towerBuff', towerType: 'cannon', splashMultiplier: 1.5 },
   },
 
   // ── Tier 2 ────────────────────────────────────────────
   {
-    id: 'WIND_BOOST', name: '💨 Tailwind',
-    description: 'All towers attack 15% faster',
-    icon: '💨', tier: 2, category: 'passive',
+    id: 'WIND_BOOST', name: '🌀 Ion Thrusters',
+    description: 'All towers fire 15% faster',
+    icon: '🌀', tier: 2, category: 'passive',
     effect: { type: 'passive', attackSpeedMultiplier: 0.85 },
   },
   {
-    id: 'EARTH_WALL', name: '🌍 Earth Wall',
-    description: 'Place a wall that blocks a path tile (mobs reroute)',
-    icon: '🌍', tier: 2, category: 'zone',
+    id: 'EARTH_WALL', name: '🪨 Asteroid Barrier',
+    description: 'Deploy a barrier that blocks a path tile (mobs reroute)',
+    icon: '🪨', tier: 2, category: 'zone',
     effect: { type: 'wall' },
   },
   {
-    id: 'GOLD_INTEREST', name: '💰 Investment',
+    id: 'GOLD_INTEREST', name: '💰 Quantum Investment',
     description: 'Interest cap increased to +8 (from +5)',
     icon: '💰', tier: 2, category: 'passive',
     effect: { type: 'passive', interestCap: 8 },
   },
   {
-    id: 'DOUBLE_SEND', name: '👹👹 Horde',
-    description: 'PvP monsters send 2 mobs instead of 1',
+    id: 'DOUBLE_SEND', name: '👹👹 Swarm Protocol',
+    description: 'Warp gates send 2 alien mobs instead of 1',
     icon: '👹', tier: 2, category: 'passive',
     effect: { type: 'passive', pvpDoubleCount: true },
   },
 
   // ── Tier 3 ────────────────────────────────────────────
   {
-    id: 'FIRE_STORM', name: '🔥🔥 Inferno',
-    description: 'All fire zones deal 3x damage',
-    icon: '🔥', tier: 3, category: 'passive',
-    effect: { type: 'zoneMultiplier', element: 'fire', multiplier: 3 },
+    id: 'FIRE_STORM', name: '☀️☀️ Solar Storm',
+    description: 'All solar flare zones deal 3x damage',
+    icon: '☀️', tier: 3, category: 'passive',
+    effect: { type: 'zoneMultiplier', element: 'solar', multiplier: 3 },
   },
   {
-    id: 'BLIZZARD', name: '💧💧 Blizzard',
-    description: 'All mobs permanently slowed 15%',
-    icon: '💧', tier: 3, category: 'passive',
+    id: 'BLIZZARD', name: '🧊🧊 Deep Freeze',
+    description: 'All targets permanently slowed 15% by cryo field',
+    icon: '🧊', tier: 3, category: 'passive',
     effect: { type: 'passive', globalSlow: 0.15 },
   },
   {
-    id: 'MEGA_INCOME', name: '💰💰 Midas Touch',
-    description: 'Income towers generate double gold',
+    id: 'MEGA_INCOME', name: '💰💰 Hyperdrive Mining',
+    description: 'Mining probes extract double credits',
     icon: '💰', tier: 3, category: 'passive',
     effect: { type: 'towerBuff', towerType: 'income', incomeMultiplier: 2 },
   },
