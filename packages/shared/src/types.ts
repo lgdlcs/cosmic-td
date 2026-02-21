@@ -1,20 +1,20 @@
 // ── Core Enums ──────────────────────────────────────────
 
-export type Element = 'fire' | 'water' | 'earth' | 'wind' | 'light' | 'dark';
-export const ELEMENTS: Element[] = ['fire', 'water', 'earth', 'wind', 'light', 'dark'];
+export type TowerType = 'arrow' | 'cannon' | 'income' | 'pvp';
+export const TOWER_TYPES: TowerType[] = ['arrow', 'cannon', 'income', 'pvp'];
 
 export type TowerTier = 1 | 2 | 3;
 
 export type PlayerColor = 'blue' | 'red' | 'green' | 'orange';
 export const PLAYER_COLORS: PlayerColor[] = ['blue', 'red', 'green', 'orange'];
 
-export type GamePhase = 'lobby' | 'shopping' | 'combat' | 'gameOver';
+export type GamePhase = 'lobby' | 'shopping' | 'augmentPick' | 'combat' | 'gameOver';
 
 // ── Grid ────────────────────────────────────────────────
 
 export interface GridPos {
-  row: number; // 0-7
-  col: number; // 0-7
+  row: number;
+  col: number;
 }
 
 // ── Tower ───────────────────────────────────────────────
@@ -22,21 +22,22 @@ export interface GridPos {
 export interface TowerDef {
   id: string;
   name: string;
-  elements: Element[];
-  tier: TowerTier;
+  towerType: TowerType;
   cost: number;
   damage: number;
   attackSpeed: number; // attacks per second
   range: number;       // grid cells
-  special?: string;
-  splashRadius?: number; // for AoE towers
+  description: string;
+  splashRadius?: number;
+  incomePerRound?: number;
+  mobPower?: number;
 }
 
 export interface TowerInstance {
   instanceId: string;
-  defId: string;
+  defId: string;        // tower def id (arrow, cannon, income, pvp)
   position: GridPos;
-  appliedElements: Element[];  // 0, 1, 2, or 3 elements applied to this tower
+  stars: number;        // 0 = base, 1 = ★ (fused from 3)
 }
 
 // ── Mob ─────────────────────────────────────────────────
@@ -47,14 +48,14 @@ export interface MobDef {
   id: string;
   type: MobType;
   baseHp: number;
-  speed: number;   // cells per second
-  damage: number;  // HP lost on leak
+  speed: number;
+  damage: number;
 }
 
 export interface MobEffect {
   type: 'slow' | 'poison' | 'burn' | 'freeze';
-  remaining: number; // ms
-  value: number;     // slow %, dps, etc.
+  remaining: number;
+  value: number;
 }
 
 export interface MobInstance {
@@ -69,33 +70,6 @@ export interface MobInstance {
   visible: boolean;
 }
 
-// ── Hex ─────────────────────────────────────────────────
-
-export type HexId =
-  | 'haste'
-  | 'fog'
-  | 'reinforcements'
-  | 'siege_golem'
-  | 'corruption'
-  | 'mirage'
-  | 'earthquake'
-  | 'void_rift'
-  | 'leech';
-
-export interface HexDef {
-  id: HexId;
-  name: string;
-  description: string;
-  cost: number;
-  tier: 1 | 2 | 3;
-}
-
-export interface HexCast {
-  hexId: HexId;
-  fromPlayerId: string;
-  toPlayerId: string;
-}
-
 // ── Player ──────────────────────────────────────────────
 
 export interface PlayerState {
@@ -104,17 +78,11 @@ export interface PlayerState {
   color: PlayerColor;
   hp: number;
   gold: number;
-  level: number;
-  xp: number;
-  xpToNext: number;
   towers: TowerInstance[];
-  fragments: Record<Element, number>;      // fragments in bank, available to consume
-  totalBought: Record<Element, number>;    // total fragments bought historically (for price scaling)
-  shop: (string | null)[];                // 5 shop slots, defIds or null
-  synergies: Record<Element, number>;     // kept for compatibility, calculated from fragments
+  shop: (string | null)[];    // 5 shop slots, tower defIds or null
+  augments: string[];         // picked augment IDs
   streak: number;
   alive: boolean;
-  incomingHex: HexCast | null;
 }
 
 // ── Map ─────────────────────────────────────────────────
@@ -135,8 +103,10 @@ export interface GameState {
   timer: number;
   players: PlayerState[];
   mapId: string;
-  mobs: Record<string, MobInstance[]>; // playerId → mobs
+  mobs: Record<string, MobInstance[]>;
   winner: string | null;
+  /** Augment choices per player during AUGMENT_PICK phase */
+  augmentChoices?: Record<string, string[]>; // playerId → augment IDs
 }
 
 // ── Game Config (lobby settings) ────────────────────────
@@ -144,7 +114,6 @@ export interface GameState {
 export interface GameConfig {
   startingGold: number;
   startingHp: number;
-  fragmentPoolSize: number;
 }
 
 // ── Network Messages ────────────────────────────────────
@@ -155,11 +124,9 @@ export type ClientMsg =
   | { type: 'SET_CONFIG'; config: Partial<GameConfig> }
   | { type: 'READY' }
   | { type: 'BUY_AND_PLACE'; shopIndex: number; position: GridPos }
-  | { type: 'BUY_FRAGMENT'; shopIndex: number }
   | { type: 'SELL_TOWER'; instanceId: string }
-  | { type: 'UPGRADE_TOWER'; instanceId: string; element: Element }
   | { type: 'REROLL' }
-  | { type: 'CAST_HEX'; hexId: HexId; targetPlayerId: string }
+  | { type: 'PICK_AUGMENT'; augmentId: string }
   | { type: 'DEV_START_COMBAT' }
   | { type: 'SET_SPEED'; speed: number };
 
@@ -177,8 +144,8 @@ export type ServerMsg =
   | { type: 'COMBAT_EVENTS'; playerId: string; attacks: CombatAttack[]; kills: CombatKill[]; leaks: string[] }
   | { type: 'MOB_KILLED'; playerId: string; mobId: string; goldReward: number }
   | { type: 'MOB_LEAKED'; playerId: string; mobId: string; damage: number; sentTo: string }
-  | { type: 'HEX_INCOMING'; hex: HexCast }
-  | { type: 'HEX_ACTIVATED'; hex: HexCast }
+  | { type: 'AUGMENT_CHOICES'; choices: { id: string; name: string; description: string; icon: string; tier: number }[] }
+  | { type: 'AUGMENT_PICKED'; playerId: string; augmentId: string }
   | { type: 'PLAYER_ELIMINATED'; playerId: string }
   | { type: 'GAME_OVER'; winnerId: string }
   | { type: 'ERROR'; message: string };

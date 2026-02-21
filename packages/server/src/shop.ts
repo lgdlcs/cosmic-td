@@ -1,64 +1,32 @@
-import type { GameState, PlayerState, Element } from '@ect/shared';
+import type { GameState, PlayerState } from '@ect/shared';
 import {
   SHOP_SLOTS,
   REROLL_COST,
   SELL_REFUND_RATIO,
-  BASE_TOWER_COSTS,
-  SHOP_FRAGMENT_CHANCE,
-  SHOP_TOWER_CHANCE,
-  FRAGMENT_POOL_SIZE,
-  ELEMENTS,
-  BASE_TOWERS,
-  getFragmentCost,
+  TOWER_COSTS,
+  TOWER_DEFS,
   TOWER_MAP,
 } from '@ect/shared';
 
 export class ShopManager {
   state: GameState;
-  fragmentPool: Map<Element, number>; // shared pool of fragments
 
-  constructor(state: GameState, fragmentPoolSize?: number) {
+  constructor(state: GameState) {
     this.state = state;
-    const poolSize = fragmentPoolSize ?? FRAGMENT_POOL_SIZE;
-    this.fragmentPool = new Map();
-    for (const element of ELEMENTS) {
-      this.fragmentPool.set(element, poolSize);
-    }
   }
 
-  /** Generate 5 shop slots for a player - base towers + fragments */
-  generateShop(player: PlayerState): (string | null)[] {
+  /** Generate 5 shop slots — equal odds among 4 tower types */
+  generateShop(_player: PlayerState): (string | null)[] {
     const shop: (string | null)[] = [];
-
     for (let i = 0; i < SHOP_SLOTS; i++) {
-      if (Math.random() < SHOP_FRAGMENT_CHANCE) {
-        // Try to generate a fragment
-        // Get elements that are still available in pool
-        const availableElements = ELEMENTS.filter(e => (this.fragmentPool.get(e) || 0) > 0);
-        
-        if (availableElements.length > 0) {
-          // Pick random available element
-          const randomElement = availableElements[Math.floor(Math.random() * availableElements.length)];
-          // Store fragment as: "fragment:<element>"
-          shop.push(`fragment:${randomElement}`);
-        } else {
-          // No fragments available, fall back to base tower
-          const randomTower = BASE_TOWERS[Math.floor(Math.random() * BASE_TOWERS.length)];
-          shop.push(randomTower.id);
-        }
-      } else {
-        // Generate base tower
-        const randomTower = BASE_TOWERS[Math.floor(Math.random() * BASE_TOWERS.length)];
-        shop.push(randomTower.id);
-      }
+      const randomTower = TOWER_DEFS[Math.floor(Math.random() * TOWER_DEFS.length)];
+      shop.push(randomTower.id);
     }
-
     return shop;
   }
 
-  /** Sell a placed tower — return to pool + refund */
+  /** Sell a placed tower — refund gold */
   sellTower(player: PlayerState, instanceId: string): boolean {
-    // Only check placed towers (no more bench)
     const towerIdx = player.towers.findIndex((t) => t.instanceId === instanceId);
     if (towerIdx < 0) return false;
 
@@ -67,15 +35,9 @@ export class ShopManager {
 
     const def = TOWER_MAP[tower.defId];
     if (def) {
-      // Calculate refund: base cost + upgrade costs
-      let refund = def.cost;
-      
-      // Add upgrade costs for applied elements
-      if (tower.appliedElements.length >= 1) refund += 3; // T1
-      if (tower.appliedElements.length >= 2) refund += 5; // T2
-      if (tower.appliedElements.length >= 3) refund += 8; // T3
-      
-      player.gold += Math.floor(refund * SELL_REFUND_RATIO);
+      // Star towers cost 3x the base (3 copies merged)
+      const totalCost = tower.stars >= 1 ? def.cost * 3 : def.cost;
+      player.gold += Math.floor(totalCost * SELL_REFUND_RATIO);
     }
 
     return true;
@@ -84,54 +46,25 @@ export class ShopManager {
   /** Reroll the shop */
   reroll(player: PlayerState): boolean {
     if (player.gold < REROLL_COST) return false;
-
     player.gold -= REROLL_COST;
     player.shop = this.generateShop(player);
     return true;
   }
 
-  /** Buy fragment from shop */
-  buyFragment(player: PlayerState, shopIndex: number): boolean {
-    if (shopIndex < 0 || shopIndex >= SHOP_SLOTS) return false;
-    const itemId = player.shop[shopIndex];
-    if (!itemId || !this.isFragment(itemId)) return false;
-
-    const element = this.getFragmentElement(itemId);
-    if (!element) return false;
-
-    // Check if fragment is still available in pool
-    const available = this.fragmentPool.get(element) || 0;
-    if (available <= 0) return false;
-
-    // Calculate cost based on player's totalBought
-    const cost = getFragmentCost(element, player.totalBought[element]);
-    if (player.gold < cost) return false;
-
-    // Execute purchase
-    player.gold -= cost;
-    player.fragments[element]++;
-    player.totalBought[element]++;
-    this.fragmentPool.set(element, available - 1);
-    player.shop[shopIndex] = null;
-
-    return true;
-  }
-
-  /** Check if a shop item is a fragment */
-  isFragment(itemId: string | null): boolean {
-    if (!itemId) return false;
-    return itemId.startsWith('fragment:');
-  }
-
-  /** Get element from fragment ID */
-  getFragmentElement(itemId: string): Element | null {
-    if (!this.isFragment(itemId)) return null;
-    const element = itemId.replace('fragment:', '') as Element;
-    return ELEMENTS.includes(element) ? element : null;
-  }
-
-  /** Get fragment cost for display in shop */
-  getFragmentCost(element: Element, player: PlayerState): number {
-    return getFragmentCost(element, player.totalBought[element]);
+  /** Try to auto-fuse: if player has 3 towers of same type+stars on the board, merge into starred version */
+  tryFusion(player: PlayerState, defId: string): boolean {
+    const candidates = player.towers.filter(t => t.defId === defId && t.stars === 0);
+    if (candidates.length >= 3) {
+      // Remove 2, upgrade 1
+      const keeper = candidates[0];
+      keeper.stars = 1;
+      // Remove the other 2
+      for (let i = 1; i <= 2; i++) {
+        const idx = player.towers.indexOf(candidates[i]);
+        if (idx >= 0) player.towers.splice(idx, 1);
+      }
+      return true;
+    }
+    return false;
   }
 }

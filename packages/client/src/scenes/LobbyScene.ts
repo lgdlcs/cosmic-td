@@ -147,7 +147,6 @@ export class LobbyScene extends Phaser.Scene {
     const settings: { key: keyof GameConfig; label: string; min: number; max: number; step: number }[] = [
       { key: 'startingGold', label: '💰 Starting Gold', min: 0, max: 500, step: 10 },
       { key: 'startingHp', label: '❤️ Starting HP', min: 1, max: 500, step: 10 },
-      { key: 'fragmentPoolSize', label: '🔮 Fragments / element', min: 1, max: 50, step: 1 },
     ];
 
     this.configSliders = [];

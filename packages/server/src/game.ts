@@ -9,33 +9,27 @@ import type {
   GameMap,
   MobInstance,
   TowerInstance,
-  Element,
   PlayerColor,
   GridPos,
 } from '@ect/shared';
 import {
   DEFAULT_GAME_CONFIG,
-  STARTING_LEVEL,
   GRID_SIZE,
   SHOP_SLOTS,
   PLAYER_COLORS,
   ALL_MAPS,
-  ELEMENTS,
   TOTAL_ROUNDS,
   SHOP_PHASE_DURATION,
   FIRST_SHOP_PHASE_DURATION,
+  AUGMENT_PICK_DURATION,
   TICK_MS,
   MOB_SYNC_INTERVAL,
   TOWER_MAP,
-  BASE_TOWER_COSTS,
-  UPGRADE_COST_T1,
-  UPGRADE_COST_T2,
-  UPGRADE_COST_T3,
-  UPGRADE_POINTS_REQUIRED_T3,
+  TOWER_COSTS,
   isPathCell,
-  HEX_MAP,
-  canUpgradeTower,
-  getUpgradeCost,
+  isAugmentRound,
+  generateAugmentChoices,
+  AUGMENT_POOL,
 } from '@ect/shared';
 import { ShopManager } from './shop.js';
 import { CombatManager } from './combat.js';
@@ -45,7 +39,7 @@ import { rooms } from './lobby.js';
 export class Game {
   state: GameState;
   map: GameMap;
-  clients: Map<string, Client>; // playerId → client
+  clients: Map<string, Client>;
   names: Map<string, string>;
   shop: ShopManager;
   combat: CombatManager;
@@ -53,46 +47,36 @@ export class Game {
   tickInterval: ReturnType<typeof setInterval> | null = null;
   phaseTimer: ReturnType<typeof setInterval> | null = null;
   tickCount = 0;
-  /** Track per-round leaks per player for clean bonus calculation */
   roundLeaks: Map<string, number> = new Map();
-  /** Game speed multiplier */
   speed: number = 1;
-
   config: GameConfig;
+  /** Track which players have picked augments this round */
+  augmentPicked: Set<string> = new Set();
 
   constructor(clients: Client[], names: Map<string, string>, config: GameConfig = DEFAULT_GAME_CONFIG) {
     this.config = config;
-    // Pick random map
     this.map = ALL_MAPS[Math.floor(Math.random() * ALL_MAPS.length)];
 
-    // Build client lookup
     this.clients = new Map();
     this.names = names;
     const playerIds: string[] = [];
 
-    clients.forEach((c, i) => {
+    clients.forEach((c) => {
       this.clients.set(c.id, c);
       playerIds.push(c.id);
     });
 
-    // Init player states
     const players: PlayerState[] = playerIds.map((id, i) => ({
       id,
       name: names.get(id) || `Player ${i + 1}`,
       color: PLAYER_COLORS[i] as PlayerColor,
       hp: config.startingHp,
       gold: config.startingGold,
-      level: STARTING_LEVEL,
-      xp: 0,
-      xpToNext: 0, // No longer used
       towers: [],
-      fragments: Object.fromEntries(ELEMENTS.map((e) => [e, 0])) as Record<Element, number>,
-      totalBought: Object.fromEntries(ELEMENTS.map((e) => [e, 0])) as Record<Element, number>,
       shop: Array(SHOP_SLOTS).fill(null),
-      synergies: Object.fromEntries(ELEMENTS.map((e) => [e, 0])) as Record<Element, number>, // For compatibility
+      augments: [],
       streak: 0,
       alive: true,
-      incomingHex: null,
     }));
 
     this.state = {
@@ -105,13 +89,11 @@ export class Game {
       winner: null,
     };
 
-    this.shop = new ShopManager(this.state, config.fragmentPoolSize);
+    this.shop = new ShopManager(this.state);
     this.combat = new CombatManager(this.state, this.map);
     this.economy = new EconomyManager(this.state);
-    // Don't start yet — wait for createGame to send GAME_START first
   }
 
-  /** Called after GAME_START is sent to clients */
   start() {
     this.startNextRound();
   }
@@ -124,82 +106,72 @@ export class Game {
 
     switch (msg.type) {
       case 'BUY_AND_PLACE': {
-        if (this.state.phase === 'gameOver' || this.state.phase === 'lobby') return;
+        if (this.state.phase !== 'shopping') return;
         if (msg.shopIndex < 0 || msg.shopIndex >= SHOP_SLOTS) return;
         const itemId = player.shop[msg.shopIndex];
         if (!itemId) return;
-        
+
         // Validate position
         if (isPathCell(this.map, msg.position)) return;
-        if (msg.position.row < 0 || msg.position.row >= GRID_SIZE || msg.position.col < 0 || msg.position.col >= GRID_SIZE) return;
+        if (msg.position.row < 0 || msg.position.row >= GRID_SIZE ||
+            msg.position.col < 0 || msg.position.col >= GRID_SIZE) return;
         if (player.towers.some((t) => t.position.row === msg.position.row && t.position.col === msg.position.col)) return;
 
-        // Only handle base towers in BUY_AND_PLACE, fragments are handled in BUY_FRAGMENT
-        // It's a base tower
         const def = TOWER_MAP[itemId];
         if (!def) return;
-        
-        const cost = BASE_TOWER_COSTS[def.id as keyof typeof BASE_TOWER_COSTS] || 3;
+
+        const cost = TOWER_COSTS[def.id] || def.cost;
         if (player.gold < cost) return;
 
-        // Create base tower with no applied elements
         const tower: TowerInstance = {
           instanceId: nanoid(8),
           defId: itemId,
           position: msg.position,
-          appliedElements: [],
+          stars: 0,
         };
         player.towers.push(tower);
-
-        // Deduct cost and clear shop slot
         player.gold -= cost;
         player.shop[msg.shopIndex] = null;
+
+        // Try fusion: 3 of same type → ★
+        this.shop.tryFusion(player, itemId);
 
         this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
         this.broadcastStateUpdate();
         break;
       }
-      case 'BUY_FRAGMENT': {
-        if (this.state.phase === 'gameOver' || this.state.phase === 'lobby') return;
-        if (this.shop.buyFragment(player, msg.shopIndex)) {
-          this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
-          this.broadcastStateUpdate();
-        }
-        break;
-      }
-      case 'UPGRADE_TOWER': {
-        if (this.state.phase === 'gameOver' || this.state.phase === 'lobby') return;
-        const tower = player.towers.find((t) => t.instanceId === msg.instanceId);
-        if (!tower) return;
-
-        const check = canUpgradeTower(
-          tower.appliedElements,
-          msg.element,
-          player.fragments,
-          player.gold,
-          player.totalBought
-        );
-        if (!check.canUpgrade) return;
-
-        // Deduct cost and fragment
-        player.gold -= check.cost;
-        player.fragments[msg.element]--;
-        tower.appliedElements.push(msg.element);
-
-        this.broadcastStateUpdate();
-        break;
-      }
       case 'SELL_TOWER': {
-        if (this.state.phase === 'gameOver' || this.state.phase === 'lobby') return;
+        if (this.state.phase !== 'shopping') return;
         if (this.shop.sellTower(player, msg.instanceId)) {
           this.broadcastStateUpdate();
         }
         break;
       }
       case 'REROLL': {
-        if (this.state.phase === 'gameOver' || this.state.phase === 'lobby') return;
+        if (this.state.phase !== 'shopping') return;
         if (this.shop.reroll(player)) {
           this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
+        }
+        break;
+      }
+      case 'PICK_AUGMENT': {
+        if (this.state.phase !== 'augmentPick') return;
+        if (this.augmentPicked.has(playerId)) return;
+        
+        // Validate the augment is in their choices
+        const choices = this.state.augmentChoices?.[playerId] || [];
+        if (!choices.includes(msg.augmentId)) return;
+        
+        player.augments.push(msg.augmentId);
+        this.augmentPicked.add(playerId);
+        
+        this.broadcast({ type: 'AUGMENT_PICKED', playerId, augmentId: msg.augmentId });
+        
+        // Check if all alive players have picked
+        const alivePlayers = this.state.players.filter(p => p.alive);
+        if (alivePlayers.every(p => this.augmentPicked.has(p.id))) {
+          if (this.phaseTimer) { clearInterval(this.phaseTimer); this.phaseTimer = null; }
+          this.startShopPhase();
         }
         break;
       }
@@ -217,19 +189,6 @@ export class Game {
         this.broadcast({ type: 'SPEED_CHANGE', speed: s });
         break;
       }
-      case 'CAST_HEX': {
-        if (this.state.phase === 'gameOver' || this.state.phase === 'lobby') return;
-        const hex = HEX_MAP[msg.hexId];
-        if (!hex) return;
-        if (player.gold < hex.cost) return;
-        const target = this.state.players.find((p) => p.id === msg.targetPlayerId && p.alive);
-        if (!target || target.id === playerId) return;
-        player.gold -= hex.cost;
-        target.incomingHex = { hexId: msg.hexId, fromPlayerId: playerId, toPlayerId: target.id };
-        this.broadcast({ type: 'HEX_INCOMING', hex: target.incomingHex });
-        this.broadcastStateUpdate();
-        break;
-      }
     }
   }
 
@@ -244,7 +203,6 @@ export class Game {
     });
   }
 
-  /** Broadcast state update with player-specific filtering */
   broadcastStateUpdate() {
     this.clients.forEach((client) => {
       if (client.ws.readyState === client.ws.OPEN) {
@@ -258,42 +216,26 @@ export class Game {
     });
   }
 
-  /** Get filtered game state for a specific player (hide sensitive opponent data) */
   getFilteredStateForPlayer(playerId: string): GameState {
-    const filteredState: GameState = {
+    return {
       ...this.state,
       players: this.state.players.map((p) => {
-        if (p.id === playerId) {
-          // Current player: full data
-          return p;
-        } else {
-          // Opponents: hide sensitive data
-          return {
-            ...p,
-            gold: 0, // Hide exact gold
-            shop: [], // Hide shop contents
-            bench: [], // Hide bench contents  
-            synergies: { fire: 0, water: 0, earth: 0, wind: 0, light: 0, dark: 0 }, // Hide exact synergies
-            streak: 0, // Hide streak
-            xp: 0, // Hide exact XP
-            xpToNext: 0,
-            // Keep: hp, level, towers (count/elements only), alive status, color, name
-          } as PlayerState;
-        }
+        if (p.id === playerId) return p;
+        return {
+          ...p,
+          gold: 0,
+          shop: [],
+          streak: 0,
+        } as PlayerState;
       }),
     };
-    return filteredState;
   }
 
-  /** Send leaked mob to a random opponent */
   sendLeakedMobToOpponent(fromPlayerId: string, leakedMob: MobInstance) {
     const opponents = this.state.players.filter(p => p.alive && p.id !== fromPlayerId);
-    if (opponents.length === 0) return; // No valid targets
+    if (opponents.length === 0) return;
 
-    // Choose random opponent (or implement targeting strategy)
     const target = opponents[Math.floor(Math.random() * opponents.length)];
-    
-    // Create new mob instance for target player with remaining HP
     const entry = this.map.entry;
     const newMob: MobInstance = {
       instanceId: nanoid(8),
@@ -301,18 +243,16 @@ export class Game {
       hp: leakedMob.hp,
       maxHp: leakedMob.maxHp,
       x: entry.col,
-      y: entry.row - 0.5, // Small offset to avoid immediate overlap
+      y: entry.row - 0.5,
       pathIndex: 0,
-      effects: [], // Clear effects when transferring
+      effects: [],
       visible: true,
     };
 
-    // Add to target's mob list
     if (!this.state.mobs[target.id]) {
       this.state.mobs[target.id] = [];
     }
     this.state.mobs[target.id].push(newMob);
-
   }
 
   sendTo(playerId: string, msg: ServerMsg) {
@@ -331,11 +271,76 @@ export class Game {
       return;
     }
 
+    // Check if this round should have augment pick
+    if (isAugmentRound(this.state.round)) {
+      this.startAugmentPick();
+    } else {
+      this.startShopPhase();
+    }
+  }
+
+  startAugmentPick() {
+    this.state.phase = 'augmentPick';
+    this.augmentPicked.clear();
+
+    // Generate 3 choices per player
+    const augmentChoices: Record<string, string[]> = {};
+    this.state.players.filter(p => p.alive).forEach(p => {
+      const choices = generateAugmentChoices(this.state.round, p.augments);
+      augmentChoices[p.id] = choices.map(a => a.id);
+      
+      // Send choices to this player
+      this.sendTo(p.id, {
+        type: 'AUGMENT_CHOICES',
+        choices: choices.map(a => ({
+          id: a.id,
+          name: a.name,
+          description: a.description,
+          icon: a.icon,
+          tier: a.tier,
+        })),
+      });
+    });
+    this.state.augmentChoices = augmentChoices;
+
+    this.state.timer = AUGMENT_PICK_DURATION;
+    this.broadcast({
+      type: 'PHASE_CHANGE',
+      phase: 'augmentPick',
+      round: this.state.round,
+      timer: AUGMENT_PICK_DURATION,
+    });
+
+    if (this.phaseTimer) { clearInterval(this.phaseTimer); this.phaseTimer = null; }
+    this.phaseTimer = setInterval(() => {
+      this.state.timer -= this.speed;
+      if (this.state.timer <= 0) {
+        this.state.timer = 0;
+        clearInterval(this.phaseTimer!);
+        this.phaseTimer = null;
+        
+        // Auto-pick for players who didn't choose
+        this.state.players.filter(p => p.alive && !this.augmentPicked.has(p.id)).forEach(p => {
+          const choices = this.state.augmentChoices?.[p.id] || [];
+          if (choices.length > 0) {
+            const randomPick = choices[Math.floor(Math.random() * choices.length)];
+            p.augments.push(randomPick);
+            this.broadcast({ type: 'AUGMENT_PICKED', playerId: p.id, augmentId: randomPick });
+          }
+        });
+        
+        this.startShopPhase();
+      }
+    }, 1000);
+  }
+
+  startShopPhase() {
     this.state.phase = 'shopping';
+    this.state.augmentChoices = undefined;
     const duration = this.state.round === 1 ? FIRST_SHOP_PHASE_DURATION : SHOP_PHASE_DURATION;
     this.state.timer = duration;
 
-    // Generate shops for all alive players
+    // Generate shops
     this.state.players.filter((p) => p.alive).forEach((p) => {
       p.shop = this.shop.generateShop(p);
     });
@@ -348,10 +353,7 @@ export class Game {
     });
     this.broadcastStateUpdate();
 
-    // Clear any leftover timer
     if (this.phaseTimer) { clearInterval(this.phaseTimer); this.phaseTimer = null; }
-
-    // Countdown timer (speed affects shopping timer too)
     this.phaseTimer = setInterval(() => {
       this.state.timer -= this.speed;
       if (this.state.timer <= 0) {
@@ -361,9 +363,6 @@ export class Game {
         this.startCombat();
       }
     }, 1000);
-
-    // Also stagger mob spawns so they don't all overlap
-    // (handled in spawnWave with delay offsets)
   }
 
   startCombat() {
@@ -381,18 +380,53 @@ export class Game {
       this.state.mobs[p.id] = this.combat.spawnWave(this.state.round, p);
     });
 
+    // PvP monster pits: send mobs to opponents
+    this.state.players.filter(p => p.alive).forEach(p => {
+      const pvpTowers = p.towers.filter(t => t.defId === 'pvp');
+      if (pvpTowers.length === 0) return;
+
+      const opponents = this.state.players.filter(op => op.alive && op.id !== p.id);
+      if (opponents.length === 0) return;
+
+      for (const pvpTower of pvpTowers) {
+        const def = TOWER_MAP[pvpTower.defId];
+        if (!def) continue;
+        
+        const mobPower = def.mobPower || 1.0;
+        const starMult = pvpTower.stars >= 1 ? 2 : 1;
+        const pvpMultiplier = p.augments.includes('PVP_BOOST') ? 1.25 : 1;
+        const doubleCount = p.augments.includes('DOUBLE_SEND') ? 2 : 1;
+        
+        const hp = Math.floor(MOB_BASE_HP * Math.pow(1.10, this.state.round - 1) * mobPower * starMult * pvpMultiplier);
+        const target = opponents[Math.floor(Math.random() * opponents.length)];
+        
+        for (let i = 0; i < doubleCount; i++) {
+          const entry = this.map.entry;
+          const newMob: MobInstance = {
+            instanceId: nanoid(8),
+            defId: 'tank', // PvP mobs are tanky
+            hp,
+            maxHp: hp,
+            x: entry.col,
+            y: entry.row - 0.3 * i,
+            pathIndex: 0,
+            effects: [],
+            visible: true,
+          };
+          if (!this.state.mobs[target.id]) this.state.mobs[target.id] = [];
+          this.state.mobs[target.id].push(newMob);
+        }
+      }
+    });
+
     this.broadcastStateUpdate();
 
-    // Reset per-round leak tracking
     this.roundLeaks.clear();
     this.state.players.filter((p) => p.alive).forEach((p) => {
       this.roundLeaks.set(p.id, 0);
     });
 
-    // Clear any leftover tick loop
     if (this.tickInterval) { clearInterval(this.tickInterval); this.tickInterval = null; }
-
-    // Start tick loop
     this.tickCount = 0;
     this.tickInterval = setInterval(() => {
       for (let i = 0; i < this.speed; i++) {
@@ -406,25 +440,19 @@ export class Game {
     if (this.state.phase === 'gameOver') return;
     this.tickCount++;
 
-    // Update each alive player's mobs
     this.state.players.filter((p) => p.alive).forEach((p) => {
       const result = this.combat.tick(p, this.state.mobs[p.id], TICK_MS);
 
-      // Handle kills
-      result.killed.forEach((mob) => {
+      result.killed.forEach(() => {
         const goldReward = this.economy.mobKillReward(this.state.round);
         p.gold += goldReward;
       });
 
-      // Handle leaks - damage player and send mobs to opponents
       result.leaked.forEach((mob) => {
         const damage = mob.hp > 0 ? Math.ceil(mob.hp / mob.maxHp * 3) + 1 : 1;
         p.hp = Math.max(0, p.hp - damage);
-        
-        // Track leaks for clean bonus
         this.roundLeaks.set(p.id, (this.roundLeaks.get(p.id) || 0) + 1);
-        
-        // Notify leak with damage
+
         this.broadcast({
           type: 'MOB_LEAKED',
           playerId: p.id,
@@ -432,12 +460,10 @@ export class Game {
           damage,
           sentTo: '',
         });
-        
-        // Send leaked mob to a random opponent (multiplayer only)
+
         this.sendLeakedMobToOpponent(p.id, mob);
       });
 
-      // Broadcast combat events (attacks, kills, leaks) in one message
       if (result.attacks.length > 0 || result.killed.length > 0 || result.leaked.length > 0) {
         this.broadcast({
           type: 'COMBAT_EVENTS',
@@ -461,21 +487,17 @@ export class Game {
         });
       }
 
-      // Update mob list (remove dead/leaked)
       this.state.mobs[p.id] = result.remaining;
     });
 
-    // Sync mob positions periodically
     if (this.tickCount % MOB_SYNC_INTERVAL === 0) {
       this.broadcast({ type: 'MOB_SYNC', mobs: this.state.mobs });
     }
 
-    // Sync gold/HP periodically during combat (every 10 ticks = 500ms)
     if (this.tickCount % 10 === 0) {
       this.broadcastStateUpdate();
     }
 
-    // Check eliminations
     this.state.players.forEach((p) => {
       if (p.alive && p.hp <= 0) {
         p.alive = false;
@@ -483,31 +505,17 @@ export class Game {
       }
     });
 
-    // Check if combat is over (all mobs resolved)
+    const alivePlayers = this.state.players.filter((p) => p.alive);
+    if (alivePlayers.length === 0 ||
+        (this.state.players.length > 1 && alivePlayers.length <= 1)) {
+      clearInterval(this.tickInterval!);
+      this.endGame();
+      return;
+    }
+
     const allMobsDone = this.state.players
       .filter((p) => p.alive)
       .every((p) => this.state.mobs[p.id].length === 0);
-
-    // Check if game over
-    const alivePlayers = this.state.players.filter((p) => p.alive);
-    if (alivePlayers.length === 0) {
-      // Everyone dead
-      clearInterval(this.tickInterval!);
-      this.endGame();
-      return;
-    }
-    if (this.state.players.length > 1 && alivePlayers.length <= 1) {
-      // Multiplayer: last one standing wins
-      clearInterval(this.tickInterval!);
-      this.endGame();
-      return;
-    }
-    if (this.state.players.length === 1 && alivePlayers.length === 0) {
-      // Solo: player died, game over
-      clearInterval(this.tickInterval!);
-      this.endGame();
-      return;
-    }
 
     if (allMobsDone) {
       clearInterval(this.tickInterval!);
@@ -517,7 +525,6 @@ export class Game {
 
   endRound() {
     if (this.state.phase === 'gameOver') return;
-    // Calculate income
     this.state.players.filter((p) => p.alive).forEach((p) => {
       const leakCount = this.roundLeaks.get(p.id) || 0;
       this.economy.endOfRoundIncome(p, leakCount === 0);
@@ -528,7 +535,7 @@ export class Game {
   }
 
   endGame() {
-    if (this.state.phase === 'gameOver') return; // prevent double-end
+    if (this.state.phase === 'gameOver') return;
     this.state.phase = 'gameOver';
     if (this.tickInterval) { clearInterval(this.tickInterval); this.tickInterval = null; }
     if (this.phaseTimer) { clearInterval(this.phaseTimer); this.phaseTimer = null; }
@@ -536,13 +543,12 @@ export class Game {
     const alive = this.state.players.filter((p) => p.alive);
     const winner = alive.length > 0
       ? alive.reduce((a, b) => (a.hp >= b.hp ? a : b))
-      : this.state.players[0]; // fallback
+      : this.state.players[0];
 
     this.state.winner = winner.id;
     this.broadcast({ type: 'GAME_OVER', winnerId: winner.id });
 
-    // Cleanup all mappings so players can rejoin lobby
-    this.clients.forEach((client, playerId) => {
+    this.clients.forEach((_client, playerId) => {
       playerToGame.delete(playerId);
     });
 
@@ -550,9 +556,7 @@ export class Game {
     if (roomCode) {
       setTimeout(() => {
         activeGames.delete(roomCode);
-        // Delete the room so players create a fresh one
         rooms.delete(roomCode);
-        // Clear roomCode on clients so they don't try to rejoin stale room
         this.clients.forEach((client) => {
           client.roomCode = null;
         });
@@ -573,27 +577,18 @@ export function getGameForPlayer(playerId: string): Game | undefined {
 
 export function createGame(clients: Client[], names: Map<string, string>, config?: GameConfig) {
   const game = new Game(clients, names, config);
-  // Store by first player's room code for lookup
   if (clients[0].roomCode) {
     activeGames.set(clients[0].roomCode, game);
   }
-  // Map each player to this game
   clients.forEach((c) => playerToGame.set(c.id, game));
 
-  // Send game start to each player with their ID
   clients.forEach((c) => {
-    // Ensure player knows their ID
-    game.sendTo(c.id, {
-      type: 'YOUR_ID',
-      id: c.id,
-    });
-    game.sendTo(c.id, {
-      type: 'GAME_START',
-      state: game.state,
-      mapDef: game.map,
-    });
+    game.sendTo(c.id, { type: 'YOUR_ID', id: c.id });
+    game.sendTo(c.id, { type: 'GAME_START', state: game.state, mapDef: game.map });
   });
 
-  // Small delay to let clients set up before first phase
   setTimeout(() => game.start(), 200);
 }
+
+// Import MOB_BASE_HP for PvP calculations
+import { MOB_BASE_HP } from '@ect/shared';

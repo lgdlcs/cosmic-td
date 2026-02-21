@@ -145,7 +145,6 @@ export function handleMessage(client: Client, msg: ClientMsg) {
       const c = msg.config;
       if (c.startingGold !== undefined) room.config.startingGold = Math.max(0, Math.min(500, Math.round(c.startingGold)));
       if (c.startingHp !== undefined) room.config.startingHp = Math.max(1, Math.min(500, Math.round(c.startingHp)));
-      if (c.fragmentPoolSize !== undefined) room.config.fragmentPoolSize = Math.max(1, Math.min(50, Math.round(c.fragmentPoolSize)));
       broadcastLobby(room);
       break;
     }

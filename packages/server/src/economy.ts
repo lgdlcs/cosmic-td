@@ -6,6 +6,8 @@ import {
   CLEAN_BONUS,
   STREAK_BONUS,
   KILL_REWARD_TIERS,
+  TOWER_MAP,
+  getTowerStats,
 } from '@ect/shared';
 
 export class EconomyManager {
@@ -19,8 +21,13 @@ export class EconomyManager {
   endOfRoundIncome(player: PlayerState, cleanRound: boolean) {
     let income = BASE_INCOME;
 
-    // Interest (1 per 10 gold, max 5)
-    const interest = Math.min(Math.floor(player.gold / 10) * INTEREST_PER_10G, MAX_INTEREST);
+    // Interest (1 per 10 gold, capped)
+    let interestCap = MAX_INTEREST;
+    // Check augment: GOLD_INTEREST raises cap
+    if (player.augments.includes('GOLD_INTEREST')) {
+      interestCap = 8;
+    }
+    const interest = Math.min(Math.floor(player.gold / 10) * INTEREST_PER_10G, interestCap);
     income += interest;
 
     // Clean bonus
@@ -35,6 +42,20 @@ export class EconomyManager {
     const streakIdx = Math.min(player.streak, STREAK_BONUS.length - 1);
     income += STREAK_BONUS[streakIdx];
 
+    // Augment: INCOME_BOOST (+3 gold/round)
+    if (player.augments.includes('INCOME_BOOST')) {
+      income += 3;
+    }
+
+    // Income towers: generate gold
+    for (const tower of player.towers) {
+      const def = TOWER_MAP[tower.defId];
+      if (def && def.towerType === 'income') {
+        const stats = getTowerStats(def, tower.stars, player.augments);
+        income += stats.incomePerRound || 0;
+      }
+    }
+
     player.gold += income;
   }
 
@@ -45,6 +66,6 @@ export class EconomyManager {
         return tier.gold;
       }
     }
-    return 1; // fallback
+    return 1;
   }
 }

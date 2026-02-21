@@ -8,32 +8,24 @@ import type {
   MobInstance,
   CombatAttack,
   GridPos,
-  Element,
 } from '@ect/shared';
 import {
   GRID_SIZE,
-  ELEMENT_COLORS,
-  ELEMENT_SYMBOLS,
   TOWER_MAP,
+  TOWER_DEFS,
+  TOWER_COLORS,
   PLAYER_COLOR_HEX,
+  TOWER_COLOR_HEX,
   isPathCell,
   getTowerStats,
-  getFragmentCost,
-  getUpgradeCost,
-  canUpgradeTower,
-  previewUpgradeStats,
-  getComboName,
-  COMBO_NAMES,
-  BASE_TOWERS,
-  ELEMENT_EFFECTS,
-  ELEMENTS,
+  AUGMENT_POOL,
 } from '@ect/shared';
 
 // ── Procedural Sound Effects (Web Audio API) ───────────
 
 class SoundFX {
   private ctx: AudioContext | null = null;
-  muted: boolean = true; // muted by default
+  muted: boolean = true;
 
   toggle(): boolean {
     this.muted = !this.muted;
@@ -70,20 +62,15 @@ class SoundFX {
   }
 
   towerPlace() { this.tone(120, 0.15, 'triangle', 0.2); this.tone(80, 0.1, 'square', 0.1); }
-  
   towerShoot(element: string) {
-    const freqs: Record<string, number> = { fire: 300, water: 500, earth: 150, wind: 700, light: 900, dark: 200 };
-    const types: Record<string, OscillatorType> = { fire: 'sawtooth', water: 'sine', earth: 'square', wind: 'triangle', light: 'sine', dark: 'sawtooth' };
-    this.tone(freqs[element] || 400, 0.08, types[element] || 'square', 0.08);
+    const freqs: Record<string, number> = { arrow: 500, cannon: 150, income: 400, pvp: 200 };
+    this.tone(freqs[element] || 400, 0.08, 'square', 0.08);
   }
-
   mobDeath() { this.tone(200, 0.1, 'square', 0.12); this.tone(100, 0.15, 'sawtooth', 0.1); }
-  
   waveStart() { this.tone(440, 0.15, 'square', 0.15); setTimeout(() => this.tone(660, 0.2, 'square', 0.15), 150); }
-  
   goldReceived() { this.tone(1200, 0.06, 'sine', 0.1); setTimeout(() => this.tone(1600, 0.06, 'sine', 0.1), 60); }
-  
   leak() { this.tone(150, 0.3, 'sawtooth', 0.2); }
+  augmentPick() { this.tone(800, 0.2, 'sine', 0.2); setTimeout(() => this.tone(1200, 0.3, 'sine', 0.15), 200); }
 }
 
 const sfx = new SoundFX();
@@ -124,11 +111,6 @@ interface LeakEffect {
   alpha: number;
 }
 
-interface ShopFlashEffect {
-  slotIndex: number;
-  alpha: number;
-}
-
 interface GridHover {
   position: GridPos;
   valid: boolean;
@@ -147,47 +129,40 @@ export class GameScene extends Phaser.Scene {
   private towerGfx!: Phaser.GameObjects.Graphics;
   private mobGfx!: Phaser.GameObjects.Graphics;
   private fxGfx!: Phaser.GameObjects.Graphics;
+  private miniGfx!: Phaser.GameObjects.Graphics;
 
   // Visual effects
   private projectiles: Projectile[] = [];
   private deathEffects: DeathEffect[] = [];
   private damageTexts: DamageText[] = [];
   private leakEffects: LeakEffect[] = [];
-  private shopFlashEffects: ShopFlashEffect[] = [];
 
-  // Tower flash (instanceId → remaining ms)
-  private towerFlash: Map<string, number> = new Map();
-
-  // Shop interaction state (no more bench)
-  private selectedShopIndex: number = -1; // -1 = none selected, 0+ = shop index
-  private selectedTowerDefId: string | null = null; // defId of selected tower for preview
+  // Shop interaction state
+  private selectedShopIndex: number = -1;
+  private selectedTowerDefId: string | null = null;
   private gridHover: GridHover | null = null;
-  private hoveredTower: string | null = null; // instanceId of hovered tower
-  
-  // Element choice overlay
-  private elementChoiceOverlay: Phaser.GameObjects.Container | null = null;
-  
-  // Tower upgrade radial menu
-  private upgradeMenu: Phaser.GameObjects.Container | null = null;
-  private upgradeTowerInstance: string | null = null;
+  private hoveredTower: string | null = null;
 
-  // Opponent mini-view graphics
-  private miniGfx!: Phaser.GameObjects.Graphics;
+  // Augment pick overlay
+  private augmentOverlay: Phaser.GameObjects.Container | null = null;
+  private augmentChoices: { id: string; name: string; description: string; icon: string; tier: number }[] = [];
 
   // UI
   private uiTopLeft!: Phaser.GameObjects.Text;
   private uiTopRight!: Phaser.GameObjects.Text;
   private uiShopSlots: Phaser.GameObjects.Text[] = [];
-  private uiFragmentBar!: Phaser.GameObjects.Text;
-  private uiSynergy!: Phaser.GameObjects.Text;
+  private uiAugmentList!: Phaser.GameObjects.Text;
   private uiOpponents: Phaser.GameObjects.Text[] = [];
-  private uiHex!: Phaser.GameObjects.Text;
   private uiMobCount!: Phaser.GameObjects.Text;
   private uiTowerHoverInfo!: Phaser.GameObjects.Text;
 
   // Timer
   private localTimer = 0;
   private timerEvent: Phaser.Time.TimerEvent | null = null;
+
+  // Speed
+  private speedButtons: Phaser.GameObjects.Text[] = [];
+  private currentSpeed: number = 1;
 
   // Network handler
   private msgHandler: ((msg: ServerMsg) => void) | null = null;
@@ -214,8 +189,6 @@ export class GameScene extends Phaser.Scene {
     this.deathEffects = [];
     this.damageTexts = [];
     this.leakEffects = [];
-    this.shopFlashEffects = [];
-    this.towerFlash.clear();
     this.selectedShopIndex = -1;
     this.selectedTowerDefId = null;
     this.gridHover = null;
@@ -224,8 +197,14 @@ export class GameScene extends Phaser.Scene {
     this.drawGrid();
     this.createUI();
 
-    // Grid click and hover
+    // Grid click
     this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
+      if (ptr.rightButtonDown()) {
+        this.selectedShopIndex = -1;
+        this.selectedTowerDefId = null;
+        this.updateUI();
+        return;
+      }
       const col = Math.floor((ptr.x - GRID_X) / CELL);
       const row = Math.floor((ptr.y - GRID_Y) / CELL);
       if (col >= 0 && col < GRID_SIZE && row >= 0 && row < GRID_SIZE) {
@@ -238,22 +217,9 @@ export class GameScene extends Phaser.Scene {
       this.updateTowerHover(ptr);
     });
 
-    // Right click to deselect or show upgrade menu
-    this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
-      if (ptr.rightButtonDown()) {
-        // Right click = close menus / deselect
-        this.hideUpgradeMenu();
-        this.selectedShopIndex = -1;
-        this.selectedTowerDefId = null;
-        this.updateUI();
-      }
-    });
-
-    // ESC to deselect and close menus
     this.input.keyboard?.on('keydown-ESC', () => {
       this.selectedShopIndex = -1;
       this.selectedTowerDefId = null;
-      this.hideUpgradeMenu();
       this.updateUI();
     });
 
@@ -261,363 +227,11 @@ export class GameScene extends Phaser.Scene {
     socket.onMessage(this.msgHandler);
     this.updateUI();
   }
-  
-  // Element choice overlay removed - fragments are bought directly from shop
-
-  private upgradePreview: Phaser.GameObjects.Container | null = null;
-  private speedButtons: Phaser.GameObjects.Text[] = [];
-  private currentSpeed: number = 1;
-
-  private showUpgradeMenu(tower: any, x: number, y: number) {
-    this.hideUpgradeMenu();
-
-    const me = this.me();
-    if (!me) return;
-    const baseDef = TOWER_MAP[tower.defId];
-    if (!baseDef) return;
-
-    this.upgradeTowerInstance = tower.instanceId;
-    this.upgradeMenu = this.add.container(x, y);
-
-    const currentStats = getTowerStats(baseDef, tower.appliedElements, me.totalBought);
-    const tierLabel = tower.appliedElements.length === 0 ? 'T0' : `T${tower.appliedElements.length}`;
-    const nextTier = tower.appliedElements.length + 1;
-    const upgradeCost = getUpgradeCost(tower.appliedElements.length);
-
-    // Background panel
-    const panelW = 180;
-    const panelH = tower.appliedElements.length >= 3 ? 80 : 240;
-    const bg = this.add.rectangle(0, 0, panelW, panelH, 0x1a1a2e, 0.95);
-    bg.setStrokeStyle(2, 0xffd93d);
-    this.upgradeMenu.add(bg);
-
-    let yOff = -panelH / 2 + 14;
-
-    // Tower name + tier
-    const nameText = this.add.text(0, yOff, `${currentStats.displayName} [${tierLabel}]`, {
-      fontSize: '11px', color: '#ffd93d', fontStyle: 'bold', align: 'center',
-    }).setOrigin(0.5);
-    this.upgradeMenu.add(nameText);
-    yOff += 16;
-
-    // Current stats line
-    const statsLine = `⚔${currentStats.damage} ⚡${currentStats.attackSpeed}/s 📐${currentStats.range}`;
-    const statsText = this.add.text(0, yOff, statsLine, {
-      fontSize: '9px', color: '#aaaaaa', align: 'center',
-    }).setOrigin(0.5);
-    this.upgradeMenu.add(statsText);
-    yOff += 14;
-
-    if (tower.appliedElements.length >= 3) {
-      // Max tier — only show sell
-      const maxText = this.add.text(0, yOff, 'MAX TIER', {
-        fontSize: '10px', color: '#ffd93d', fontStyle: 'bold',
-      }).setOrigin(0.5);
-      this.upgradeMenu.add(maxText);
-      yOff += 16;
-    } else {
-      // Upgrade cost label
-      const costLabel = this.add.text(0, yOff, `Upgrade → T${nextTier} (${upgradeCost}g)`, {
-        fontSize: '10px', color: '#cccccc', fontStyle: 'bold',
-      }).setOrigin(0.5);
-      this.upgradeMenu.add(costLabel);
-      yOff += 16;
-
-      // Element buttons — grid layout
-      const cols = 3;
-      const btnSize = 22;
-      const gap = 4;
-      const startX = -(cols * (btnSize * 2 + gap) - gap) / 2 + btnSize;
-
-      ELEMENTS.forEach((element, i) => {
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        const btnX = startX + col * (btnSize * 2 + gap);
-        const btnY = yOff + row * (btnSize * 2 + gap + 10);
-
-        const alreadyApplied = tower.appliedElements.includes(element);
-        const check = canUpgradeTower(
-          tower.appliedElements, element, me.fragments, me.gold, me.totalBought
-        );
-
-        const color = Phaser.Display.Color.HexStringToColor(ELEMENT_COLORS[element]).color;
-        const btn = this.add.circle(btnX, btnY, btnSize, color, check.canUpgrade ? 0.8 : 0.25);
-        btn.setStrokeStyle(2, alreadyApplied ? 0x00ff00 : check.canUpgrade ? 0xffffff : 0x444444);
-
-        if (alreadyApplied) {
-          const chk = this.add.text(btnX, btnY, '✓', {
-            fontSize: '14px', color: '#00ff00', fontStyle: 'bold',
-          }).setOrigin(0.5);
-          this.upgradeMenu!.add(chk);
-        } else {
-          const sym = this.add.text(btnX, btnY - 6, ELEMENT_SYMBOLS[element], {
-            fontSize: '11px', color: check.canUpgrade ? '#ffffff' : '#555555',
-          }).setOrigin(0.5);
-          const cnt = this.add.text(btnX, btnY + 8, `×${me.fragments[element] || 0}`, {
-            fontSize: '8px', color: check.canUpgrade ? '#ffffff' : '#555555',
-          }).setOrigin(0.5);
-          this.upgradeMenu!.add(sym);
-          this.upgradeMenu!.add(cnt);
-
-          // Reason tooltip for locked elements
-          if (!check.canUpgrade && check.reason) {
-            const reason = this.add.text(btnX, btnY + 18, check.reason, {
-              fontSize: '7px', color: '#ff6666',
-            }).setOrigin(0.5);
-            this.upgradeMenu!.add(reason);
-          }
-        }
-
-        this.upgradeMenu!.add(btn);
-
-        if (check.canUpgrade) {
-          btn.setInteractive({ useHandCursor: true });
-          btn.on('pointerdown', () => {
-            socket.send({ type: 'UPGRADE_TOWER', instanceId: tower.instanceId, element });
-            this.hideUpgradeMenu();
-          });
-          btn.on('pointerover', () => {
-            btn.setStrokeStyle(3, 0xffd93d);
-            this.showUpgradePreview(tower, element, me, baseDef, x + panelW / 2 + 10, y);
-          });
-          btn.on('pointerout', () => {
-            btn.setStrokeStyle(2, 0xffffff);
-            this.hideUpgradePreview();
-          });
-        }
-      });
-
-      yOff += Math.ceil(ELEMENTS.length / cols) * (btnSize * 2 + gap + 10) + 4;
-    }
-
-    // Sell button
-    const totalInvested = (tower.appliedElements.length === 0 ? baseDef.cost :
-      baseDef.cost + tower.appliedElements.reduce((sum: number, _: any, idx: number) => sum + getUpgradeCost(idx), 0));
-    const sellRefund = Math.floor(totalInvested * 0.7);
-    const sellBtn = this.add.text(0, panelH / 2 - 16, `🗑 Sell (${sellRefund}g)`, {
-      fontSize: '10px', color: '#ff6b6b', backgroundColor: '#2a1a1a',
-      padding: { x: 6, y: 3 },
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    sellBtn.on('pointerdown', () => {
-      socket.send({ type: 'SELL_TOWER', instanceId: tower.instanceId });
-      this.hideUpgradeMenu();
-    });
-    this.upgradeMenu.add(sellBtn);
-
-    this.upgradeMenu.setDepth(15);
-  }
-
-  private showUpgradePreview(tower: any, element: Element, me: PlayerState, baseDef: any, px: number, py: number) {
-    this.hideUpgradePreview();
-    const { before, after } = previewUpgradeStats(baseDef, tower.appliedElements, element, me.totalBought);
-
-    this.upgradePreview = this.add.container(px, py);
-    const pw = 160;
-    const ph = 100;
-    const bg = this.add.rectangle(0, 0, pw, ph, 0x111122, 0.95);
-    bg.setStrokeStyle(1, 0x666666);
-    this.upgradePreview.add(bg);
-
-    let yy = -ph / 2 + 12;
-
-    // New name
-    const newName = this.add.text(0, yy, after.displayName, {
-      fontSize: '10px', color: '#ffd93d', fontStyle: 'bold',
-    }).setOrigin(0.5);
-    this.upgradePreview.add(newName);
-    yy += 16;
-
-    // Stat comparisons
-    const stats: { label: string; before: number; after: number; unit: string }[] = [
-      { label: '⚔ DMG', before: before.damage, after: after.damage, unit: '' },
-      { label: '⚡ AS', before: before.attackSpeed, after: after.attackSpeed, unit: '/s' },
-      { label: '📐 Range', before: before.range, after: after.range, unit: '' },
-    ];
-
-    stats.forEach(s => {
-      const diff = s.after - s.before;
-      const diffColor = diff > 0 ? '#44ff44' : diff < 0 ? '#ff4444' : '#888888';
-      const arrow = diff > 0 ? '▲' : diff < 0 ? '▼' : '=';
-      const diffStr = diff !== 0 ? ` ${arrow}${Math.abs(Math.round(diff * 100) / 100)}` : '';
-      const line = `${s.label}: ${s.before}${s.unit} → ${s.after}${s.unit}${diffStr}`;
-      const text = this.add.text(0, yy, line, {
-        fontSize: '9px', color: diffColor,
-      }).setOrigin(0.5);
-      this.upgradePreview!.add(text);
-      yy += 13;
-    });
-
-    // Effects gained
-    const effect = ELEMENT_EFFECTS[element];
-    const effectLine = `+ ${effect.description}`;
-    const effectText = this.add.text(0, yy + 4, effectLine, {
-      fontSize: '9px', color: '#aaddff', fontStyle: 'bold',
-    }).setOrigin(0.5);
-    this.upgradePreview.add(effectText);
-
-    this.upgradePreview.setDepth(16);
-  }
-
-  private hideUpgradePreview() {
-    if (this.upgradePreview) {
-      this.upgradePreview.destroy();
-      this.upgradePreview = null;
-    }
-  }
-
-  // ── Evolution Tree Overlay ─────────────────────────────
-
-  private evoTreeEl: HTMLDivElement | null = null;
-
-  private toggleEvoTree() {
-    if (this.evoTreeEl) {
-      this.evoTreeEl.remove();
-      this.evoTreeEl = null;
-      return;
-    }
-
-    const container = document.getElementById('game-container')!;
-    const panel = document.createElement('div');
-    panel.style.cssText = `
-      position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-      width:860px; max-height:620px; overflow-y:auto;
-      background:#0d0d1a; border:2px solid #ffd93d; border-radius:12px;
-      padding:20px; font-family:'Segoe UI',sans-serif; color:#eee; z-index:100;
-      font-size:13px; line-height:1.5;
-    `;
-
-    const SYMBOLS: Record<string, string> = { fire:'🔥', water:'💧', earth:'🌍', wind:'💨', light:'☀️', dark:'🌑' };
-    const COLORS: Record<string, string> = { fire:'#FF6B35', water:'#4EA8DE', earth:'#8B7355', wind:'#A8E6CF', light:'#FFD93D', dark:'#9B5DE5' };
-
-    // T2 combos
-    const t2: [string,string,string][] = [
-      ['fire+water','Steam','Burn + Slow'],['earth+fire','Magma','Burn + Power'],
-      ['fire+wind','Blaze','Burn + Speed'],['fire+light','Solar','Burn + Range'],
-      ['dark+fire','Hellfire','Burn + Poison'],['earth+water','Mud','Slow + Power'],
-      ['water+wind','Storm','Slow + Speed'],['light+water','Prism','Slow + Range'],
-      ['dark+water','Abyssal','Slow + Poison'],['earth+wind','Gale','Power + Speed'],
-      ['earth+light','Radiant','Power + Range'],['dark+earth','Shadow','Power + Poison'],
-      ['light+wind','Zephyr','Speed + Range'],['dark+wind','Phantom','Speed + Poison'],
-      ['dark+light','Eclipse','Range + Poison'],
-    ];
-    const t3: [string,string,string][] = [
-      ['earth+fire+water','Geyser','Burn+Slow+Power'],['fire+water+wind','Typhoon','Burn+Slow+Speed'],
-      ['fire+light+water','Aurora','Burn+Slow+Range'],['dark+fire+water','Voodoo','Burn+Slow+Poison'],
-      ['earth+fire+wind','Sandstorm','Burn+Power+Speed'],['earth+fire+light','Forge','Burn+Power+Range'],
-      ['dark+earth+fire','Infernal','Burn+Power+Poison'],['fire+light+wind','Phoenix','Burn+Speed+Range'],
-      ['dark+fire+wind','Wraith','Burn+Speed+Poison'],['dark+fire+light','Purgatory','Burn+Range+Poison'],
-      ['earth+water+wind','Monsoon','Slow+Power+Speed'],['earth+light+water','Crystal','Slow+Power+Range'],
-      ['dark+earth+water','Swamp','Slow+Power+Poison'],['light+water+wind','Rainbow','Slow+Speed+Range'],
-      ['dark+water+wind','Maelstrom','Slow+Speed+Poison'],['dark+light+water','Leviathan','Slow+Range+Poison'],
-      ['earth+light+wind','Titan','Power+Speed+Range'],['dark+earth+wind','Decay','Power+Speed+Poison'],
-      ['dark+earth+light','Obsidian','Power+Range+Poison'],['dark+light+wind','Specter','Speed+Range+Poison'],
-    ];
-
-    const elDots = (key: string) => key.split('+').map(e => 
-      `<span style="color:${COLORS[e]}">${SYMBOLS[e]}</span>`
-    ).join('');
-
-    const bases = [
-      { name:'Archer', emoji:'🏹', cost:3, desc:'Fast, single target' },
-      { name:'Cannon', emoji:'💣', cost:4, desc:'Slow AoE splash' },
-      { name:'Mage', emoji:'🔮', cost:5, desc:'Balanced, effects' },
-    ];
-
-    let html = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <span style="font-size:18px;font-weight:bold;color:#ffd93d">📖 Evolution Tree</span>
-        <span id="evo-close" style="cursor:pointer;font-size:20px;color:#888">✕</span>
-      </div>
-      <div style="display:flex;gap:6px;margin-bottom:10px;font-size:11px;color:#888">
-        <span>T1 = 3g</span><span>•</span><span>T2 = 5g</span><span>•</span>
-        <span>T3 = 8g (need 2pts each)</span><span>•</span>
-        <span style="color:#ffd93d">126 unique towers</span>
-      </div>
-    `;
-
-    // Base towers
-    html += `<div style="display:flex;gap:12px;margin-bottom:14px">`;
-    bases.forEach(b => {
-      html += `<div style="flex:1;background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:8px;text-align:center">
-        <div style="font-size:16px">${b.emoji}</div>
-        <div style="font-weight:bold">${b.name}</div>
-        <div style="font-size:11px;color:#888">${b.cost}g — ${b.desc}</div>
-      </div>`;
-    });
-    html += `</div>`;
-
-    // T1
-    html += `<div style="font-weight:bold;color:#4a6;margin-bottom:6px">▸ T1 — Single Element (3g)</div>`;
-    html += `<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">`;
-    Object.entries(SYMBOLS).forEach(([el, sym]) => {
-      const eff: Record<string,string> = { fire:'Burn DoT', water:'Slow 25%', earth:'+40% DMG', wind:'+30% AS', light:'+1 Range', dark:'Poison DoT' };
-      html += `<div style="background:#1a1a2e;border:1px solid ${COLORS[el]};border-radius:6px;padding:4px 10px;font-size:12px">
-        ${sym} <b style="color:${COLORS[el]}">${el.charAt(0).toUpperCase()+el.slice(1)}</b> — ${eff[el]}
-      </div>`;
-    });
-    html += `</div>`;
-
-    // T2
-    html += `<div style="font-weight:bold;color:#c80;margin-bottom:6px">▸ T2 — Dual Element (5g) — 15 combos</div>`;
-    html += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:14px">`;
-    t2.forEach(([key, name, fx]) => {
-      html += `<div style="background:#1a1a2e;border:1px solid #333;border-radius:4px;padding:4px 8px;font-size:11px">
-        ${elDots(key)} <b style="color:#e0c060">${name}</b> <span style="color:#888">— ${fx}</span>
-      </div>`;
-    });
-    html += `</div>`;
-
-    // T3
-    html += `<div style="font-weight:bold;color:#f44;margin-bottom:6px">▸ T3 — Triple Element (8g) — 20 combos</div>`;
-    html += `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px;margin-bottom:10px">`;
-    t3.forEach(([key, name, fx]) => {
-      html += `<div style="background:#1a1a2e;border:1px solid #444;border-radius:4px;padding:4px 8px;font-size:11px">
-        ${elDots(key)} <b style="color:#ff8844">${name}</b> <span style="color:#888">— ${fx}</span>
-      </div>`;
-    });
-    html += `</div>`;
-
-    // Element points reminder
-    html += `<div style="background:#111;border:1px dashed #333;border-radius:6px;padding:8px;font-size:11px;color:#aaa">
-      <b style="color:#ffd93d">💡 Element Points:</b> +1 free/round (your choice) or buy crystals in shop (4g).
-      Points scale ALL towers with that element: 2pts = +15% DMG, 3pts = +30% DMG.
-      T3 requires 2+ points in each of the 3 elements.
-    </div>`;
-
-    panel.innerHTML = html;
-    container.appendChild(panel);
-    this.evoTreeEl = panel;
-
-    panel.querySelector('#evo-close')!.addEventListener('click', () => this.toggleEvoTree());
-  }
-
-  private updateSpeedButtons() {
-    const speeds = [1, 2, 3, 5, 10];
-    this.speedButtons.forEach((btn, i) => {
-      const s = speeds[i];
-      const active = s === this.currentSpeed;
-      btn.setStyle({
-        color: active ? '#1a1a2e' : '#ccc',
-        backgroundColor: active ? '#FFD93D' : '#2a2a3e',
-      });
-    });
-  }
-
-  private hideUpgradeMenu() {
-    this.hideUpgradePreview();
-    if (this.upgradeMenu) {
-      this.upgradeMenu.destroy();
-      this.upgradeMenu = null;
-    }
-    this.upgradeTowerInstance = null;
-  }
 
   shutdown() {
     if (this.msgHandler) socket.offMessage(this.msgHandler);
     if (this.timerEvent) this.timerEvent.destroy();
-    if (this.elementChoiceOverlay) this.elementChoiceOverlay.destroy();
-    if (this.upgradeMenu) this.upgradeMenu.destroy();
-    if (this.evoTreeEl) { this.evoTreeEl.remove(); this.evoTreeEl = null; }
+    if (this.augmentOverlay) this.augmentOverlay.destroy();
   }
 
   update(_time: number, delta: number) {
@@ -625,8 +239,6 @@ export class GameScene extends Phaser.Scene {
     this.updateDeathEffects(delta);
     this.updateDamageTexts(delta);
     this.updateLeakEffects(delta);
-    this.updateTowerFlash(delta);
-    this.updateShopFlashEffects(delta);
 
     this.drawTowers();
     this.drawMobs();
@@ -634,7 +246,6 @@ export class GameScene extends Phaser.Scene {
     this.drawFX();
     this.drawOpponentMiniViews();
 
-    // Update mob count during combat
     if (this.gameState.phase === 'combat') {
       const mobs = this.gameState.mobs[this.myId] || [];
       this.uiMobCount.setText(`Mobs: ${mobs.length} remaining`);
@@ -646,7 +257,6 @@ export class GameScene extends Phaser.Scene {
   // ── Network ───────────────────────────────────────────
 
   private handleMsg(msg: ServerMsg) {
-    // Debug logs removed
     switch (msg.type) {
       case 'STATE_UPDATE':
         this.gameState = msg.state;
@@ -658,12 +268,15 @@ export class GameScene extends Phaser.Scene {
         this.gameState.round = msg.round;
         this.startLocalTimer(msg.timer);
         this.updateUI();
-        // Phase announcement flash
         if (msg.phase === 'combat') {
+          this.hideAugmentOverlay();
           this.showPhaseFlash('⚔️ COMBAT');
           sfx.waveStart();
         } else if (msg.phase === 'shopping') {
+          this.hideAugmentOverlay();
           this.showPhaseFlash(`🛒 ROUND ${msg.round}`);
+        } else if (msg.phase === 'augmentPick') {
+          this.showPhaseFlash('✨ AUGMENT PICK');
         }
         break;
 
@@ -672,7 +285,6 @@ export class GameScene extends Phaser.Scene {
         if (me) {
           me.shop = msg.shop;
           me.gold = msg.gold;
-          
           this.updateUI();
         }
         break;
@@ -697,6 +309,18 @@ export class GameScene extends Phaser.Scene {
         }
         break;
 
+      case 'AUGMENT_CHOICES':
+        this.augmentChoices = msg.choices;
+        this.showAugmentOverlay();
+        break;
+
+      case 'AUGMENT_PICKED':
+        if (msg.playerId === this.myId) {
+          this.hideAugmentOverlay();
+          sfx.augmentPick();
+        }
+        break;
+
       case 'SPEED_CHANGE':
         this.currentSpeed = msg.speed;
         this.updateSpeedButtons();
@@ -713,59 +337,149 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // ── Augment Pick Overlay ──────────────────────────────
+
+  private showAugmentOverlay() {
+    this.hideAugmentOverlay();
+    
+    const cx = GRID_X + GRID_PX / 2;
+    const cy = GRID_Y + GRID_PX / 2;
+    
+    this.augmentOverlay = this.add.container(0, 0).setDepth(20);
+    
+    // Dark backdrop
+    const backdrop = this.add.rectangle(cx, cy, GRID_PX + 200, GRID_PX + 100, 0x000000, 0.8);
+    this.augmentOverlay.add(backdrop);
+    
+    // Title
+    const title = this.add.text(cx, cy - 180, `✨ Choose Your Augment — Round ${this.gameState.round}`, {
+      fontSize: '24px', color: '#FFD93D', fontStyle: 'bold',
+      stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5);
+    this.augmentOverlay.add(title);
+    
+    // Timer
+    const timerText = this.add.text(cx, cy - 150, `⏱ ${this.localTimer}s`, {
+      fontSize: '16px', color: '#aaa',
+    }).setOrigin(0.5);
+    this.augmentOverlay.add(timerText);
+    
+    // Update timer display
+    const timerInterval = setInterval(() => {
+      if (!this.augmentOverlay) { clearInterval(timerInterval); return; }
+      timerText.setText(`⏱ ${this.localTimer}s`);
+    }, 500);
+    
+    // Cards
+    const cardW = 200;
+    const cardH = 250;
+    const gap = 20;
+    const startX = cx - ((this.augmentChoices.length - 1) * (cardW + gap)) / 2;
+    
+    const tierColors: Record<number, number> = { 1: 0x336633, 2: 0x335588, 3: 0x883355 };
+    const tierBorders: Record<number, number> = { 1: 0x44cc44, 2: 0x4488ff, 3: 0xff44aa };
+    const tierLabels: Record<number, string> = { 1: 'TIER 1', 2: 'TIER 2', 3: 'TIER 3' };
+    
+    this.augmentChoices.forEach((aug, i) => {
+      const cardX = startX + i * (cardW + gap);
+      const cardY = cy + 20;
+      
+      // Card background
+      const cardBg = this.add.rectangle(cardX, cardY, cardW, cardH, tierColors[aug.tier] || 0x333333, 0.9);
+      cardBg.setStrokeStyle(3, tierBorders[aug.tier] || 0x888888);
+      cardBg.setInteractive({ useHandCursor: true });
+      this.augmentOverlay!.add(cardBg);
+      
+      // Tier label
+      const tier = this.add.text(cardX, cardY - cardH / 2 + 20, tierLabels[aug.tier] || '', {
+        fontSize: '11px', color: '#aaa', fontStyle: 'bold',
+      }).setOrigin(0.5);
+      this.augmentOverlay!.add(tier);
+      
+      // Icon
+      const icon = this.add.text(cardX, cardY - 40, aug.icon, {
+        fontSize: '48px',
+      }).setOrigin(0.5);
+      this.augmentOverlay!.add(icon);
+      
+      // Name
+      const name = this.add.text(cardX, cardY + 20, aug.name, {
+        fontSize: '16px', color: '#ffffff', fontStyle: 'bold',
+        align: 'center',
+      }).setOrigin(0.5);
+      this.augmentOverlay!.add(name);
+      
+      // Description
+      const desc = this.add.text(cardX, cardY + 55, aug.description, {
+        fontSize: '12px', color: '#cccccc',
+        align: 'center',
+        wordWrap: { width: cardW - 20 },
+      }).setOrigin(0.5);
+      this.augmentOverlay!.add(desc);
+      
+      // Hover effect
+      cardBg.on('pointerover', () => {
+        cardBg.setStrokeStyle(4, 0xffd93d);
+        cardBg.setScale(1.05);
+      });
+      cardBg.on('pointerout', () => {
+        cardBg.setStrokeStyle(3, tierBorders[aug.tier] || 0x888888);
+        cardBg.setScale(1);
+      });
+      
+      // Click to pick
+      cardBg.on('pointerdown', () => {
+        socket.send({ type: 'PICK_AUGMENT', augmentId: aug.id });
+      });
+    });
+  }
+
+  private hideAugmentOverlay() {
+    if (this.augmentOverlay) {
+      this.augmentOverlay.destroy();
+      this.augmentOverlay = null;
+    }
+  }
+
   // ── Combat Events → Visual Effects ────────────────────
 
   private onCombatEvents(attacks: CombatAttack[], kills: { mobId: string; x: number; y: number; gold: number }[], leaks: string[]) {
-    // Play shoot sounds (throttled — max 3 per batch)
     for (const atk of attacks.slice(0, 3)) {
       sfx.towerShoot(atk.element);
     }
 
-    // Spawn projectiles
     for (const atk of attacks) {
       const sx = GRID_X + atk.towerX * CELL + CELL / 2;
       const sy = GRID_Y + atk.towerY * CELL + CELL / 2;
       const tx = GRID_X + atk.targetX * CELL + CELL / 2;
       const ty = GRID_Y + atk.targetY * CELL + CELL / 2;
-      const color = Phaser.Display.Color.HexStringToColor(
-        ELEMENT_COLORS[atk.element as keyof typeof ELEMENT_COLORS] || '#fff'
-      ).color;
+      const colorHex = TOWER_COLOR_HEX[atk.element as keyof typeof TOWER_COLOR_HEX] || '#ffffff';
+      const color = Phaser.Display.Color.HexStringToColor(colorHex).color;
 
       this.projectiles.push({
         x: sx, y: sy, tx, ty,
         color,
-        speed: 600, // pixels per second
+        speed: 600,
         alive: true,
         splash: atk.splash,
       });
-
-      // Damage numbers removed — too noisy
-
-      // Tower flash
-      // (we don't have towerId mapped to position here, so flash is implicit via projectile origin)
     }
 
-    // Death effects + sounds for killed mobs
     if (kills.length > 0) sfx.mobDeath();
     if (kills.length > 0) sfx.goldReceived();
     for (const kill of kills) {
       const mx = GRID_X + kill.x * CELL + CELL / 2;
       const my = GRID_Y + kill.y * CELL + CELL / 2;
-      this.deathEffects.push({
-        x: mx, y: my, radius: 8, alpha: 1, color: 0xFFD93D,
-      });
-      // Gold pop text
+      this.deathEffects.push({ x: mx, y: my, radius: 8, alpha: 1, color: 0xFFD93D });
       this.spawnFloatingText(mx + (Math.random() - 0.5) * 10, my - 15, `+${kill.gold}g`, -30);
     }
 
-    // Leak effects
     if (leaks.length > 0) sfx.leak();
-    for (const mobId of leaks) {
+    for (const _mobId of leaks) {
       const exit = this.mapDef.exit;
       const ex = GRID_X + exit.col * CELL + CELL / 2;
       const ey = GRID_Y + exit.row * CELL + CELL / 2;
       this.leakEffects.push({ x: ex, y: ey, alpha: 1 });
-      // Leak indicator is handled by MOB_LEAKED message
     }
   }
 
@@ -778,9 +492,8 @@ export class GameScene extends Phaser.Scene {
       const dx = p.tx - p.x;
       const dy = p.ty - p.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < p.speed * dtSec) {
-        p.alive = false;
-      } else {
+      if (dist < p.speed * dtSec) p.alive = false;
+      else {
         p.x += (dx / dist) * p.speed * dtSec;
         p.y += (dy / dist) * p.speed * dtSec;
       }
@@ -804,16 +517,11 @@ export class GameScene extends Phaser.Scene {
       const color = isGold ? '#FFD93D' : isLeak ? '#ff4444' : '#ffffff';
       const fontSize = isGold ? 16 : 13;
       const obj = this.add.text(x, y, text, {
-        fontSize: `${fontSize}px`,
-        color,
-        fontStyle: 'bold',
-        stroke: '#000000',
-        strokeThickness: 4,
+        fontSize: `${fontSize}px`, color, fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: 4,
       }).setOrigin(0.5).setDepth(25);
       this.damageTexts.push({ x, y, text, alpha: 1, vy, obj });
-    } catch {
-      // ignore if scene is shutting down
-    }
+    } catch { /* ignore if scene shutting down */ }
   }
 
   private updateDamageTexts(dt: number) {
@@ -826,42 +534,16 @@ export class GameScene extends Phaser.Scene {
         t.obj.setAlpha(Math.max(0, t.alpha));
       }
     }
-    // Clean up expired
     this.damageTexts = this.damageTexts.filter((t) => {
-      if (t.alpha <= 0) {
-        t.obj?.destroy();
-        return false;
-      }
+      if (t.alpha <= 0) { t.obj?.destroy(); return false; }
       return true;
     });
   }
 
   private updateLeakEffects(dt: number) {
     const dtSec = dt / 1000;
-    for (const l of this.leakEffects) {
-      l.alpha -= 2 * dtSec;
-    }
+    for (const l of this.leakEffects) l.alpha -= 2 * dtSec;
     this.leakEffects = this.leakEffects.filter((l) => l.alpha > 0);
-  }
-
-  private updateTowerFlash(dt: number) {
-    for (const [id, remaining] of this.towerFlash) {
-      const next = remaining - dt;
-      if (next <= 0) this.towerFlash.delete(id);
-      else this.towerFlash.set(id, next);
-    }
-  }
-
-  private updateShopFlashEffects(dt: number) {
-    const dtSec = dt / 1000;
-    for (const flash of this.shopFlashEffects) {
-      flash.alpha -= 2.5 * dtSec;
-    }
-    this.shopFlashEffects = this.shopFlashEffects.filter(f => f.alpha > 0);
-  }
-
-  private triggerShopFlash(slotIndex: number) {
-    this.shopFlashEffects.push({ slotIndex, alpha: 1 });
   }
 
   private updateGridHover(ptr: Phaser.Input.Pointer) {
@@ -869,18 +551,15 @@ export class GameScene extends Phaser.Scene {
       this.gridHover = null;
       return;
     }
-
     const col = Math.floor((ptr.x - GRID_X) / CELL);
     const row = Math.floor((ptr.y - GRID_Y) / CELL);
-    
+
     if (col >= 0 && col < GRID_SIZE && row >= 0 && row < GRID_SIZE && this.selectedShopIndex >= 0) {
       const position = { row, col };
       const me = this.me();
       const isPath = isPathCell(this.mapDef, position);
       const isOccupied = me?.towers.some(t => t.position.row === row && t.position.col === col);
-      const valid = !isPath && !isOccupied;
-      
-      this.gridHover = { position, valid };
+      this.gridHover = { position, valid: !isPath && !isOccupied };
     } else {
       this.gridHover = null;
     }
@@ -889,84 +568,54 @@ export class GameScene extends Phaser.Scene {
   private updateTowerHover(ptr: Phaser.Input.Pointer) {
     const col = Math.floor((ptr.x - GRID_X) / CELL);
     const row = Math.floor((ptr.y - GRID_Y) / CELL);
-    
+
     if (col >= 0 && col < GRID_SIZE && row >= 0 && row < GRID_SIZE) {
       const me = this.me();
       const tower = me?.towers.find(t => t.position.row === row && t.position.col === col);
-      
+
       if (tower) {
         this.hoveredTower = tower.instanceId;
         const def = TOWER_MAP[tower.defId];
-        if (def) {
-          // Calculate actual stats using new system
-          const me = this.me();
-          if (!me) return;
-          
-          const towerStats = getTowerStats(def, tower.appliedElements, me.totalBought);
-          
-          const elems = tower.appliedElements.length > 0 
-            ? tower.appliedElements.map(e => `${ELEMENT_SYMBOLS[e]}${e}`).join(', ')
-            : 'No elements';
-          
-          // Calculate sell price including upgrades
-          let sellPrice = Math.floor(def.cost * 0.7);
-          if (tower.appliedElements.length >= 1) sellPrice += Math.floor(3 * 0.7);
-          if (tower.appliedElements.length >= 2) sellPrice += Math.floor(5 * 0.7);
-          if (tower.appliedElements.length >= 3) sellPrice += Math.floor(8 * 0.7);
-          
-          let info = `${towerStats.displayName}\n`;
-          info += `Elements: ${elems}\n`;
-          info += `DMG: ${towerStats.damage}  ATK SPD: ${towerStats.attackSpeed}/s  RANGE: ${towerStats.range}`;
-          
-          if (def.special) {
-            info += `\nBase: ${def.special}`;
-          }
-          
-          if (towerStats.splashRadius) {
-            info += `\nSplash radius: ${towerStats.splashRadius}`;
-          }
-          
-          // Show element effects
-          if (towerStats.effects.length > 0) {
-            info += `\nEffects: ${towerStats.effects.map(e => e.name).join(', ')}`;
-          }
-          
+        if (def && me) {
+          const stats = getTowerStats(def, tower.stars, me.augments);
+          const starLabel = tower.stars >= 1 ? ' ★' : '';
+
+          let info = `${stats.displayName}\n`;
+          info += `${def.description}\n`;
+          if (stats.damage > 0) info += `DMG: ${stats.damage}  ATK SPD: ${stats.attackSpeed}/s  RANGE: ${stats.range}\n`;
+          if (stats.splashRadius) info += `Splash: ${stats.splashRadius}\n`;
+          if (stats.incomePerRound) info += `Income: +${stats.incomePerRound}g/round\n`;
+          if (stats.mobPower) info += `PvP Power: ${stats.mobPower}\n`;
+
           if (this.gameState.phase === 'shopping') {
-            info += `\n💰 Click to sell for ${sellPrice}g`;
-            if (tower.appliedElements.length < 3) {
-              const cost = getUpgradeCost(tower.appliedElements.length);
-              info += `\n⚡ Right-click to upgrade (${cost}g)`;
-            }
+            const sellPrice = Math.floor((tower.stars >= 1 ? def.cost * 3 : def.cost) * 0.7);
+            info += `\n💰 Click to sell (${sellPrice}g)`;
           }
-          
+
           this.uiTowerHoverInfo.setText(info).setVisible(true);
-          
-          // Position tooltip near mouse cursor but keep it on screen
           const tooltipX = Math.min(ptr.x + 15, this.scale.width - 250);
           const tooltipY = Math.max(ptr.y - 60, 10);
           this.uiTowerHoverInfo.setPosition(tooltipX, tooltipY);
         }
       } else {
         this.hoveredTower = null;
-        this.uiTowerHoverInfo.setText('').setVisible(false);
+        this.uiTowerHoverInfo.setVisible(false);
       }
     } else {
       this.hoveredTower = null;
-      this.uiTowerHoverInfo.setText('').setVisible(false);
+      this.uiTowerHoverInfo.setVisible(false);
     }
   }
 
   private drawGridPreview() {
-    // Clear preview layer every frame
     this.previewGfx.clear();
-    
+
     if (this.gridHover && this.selectedShopIndex >= 0 && this.selectedTowerDefId) {
       const x = GRID_X + this.gridHover.position.col * CELL;
       const y = GRID_Y + this.gridHover.position.row * CELL;
       const cx = x + CELL / 2;
       const cy = y + CELL / 2;
-      
-      // Draw preview cell background
+
       if (this.gridHover.valid) {
         this.previewGfx.fillStyle(0x44ff44, 0.3);
         this.previewGfx.lineStyle(2, 0x44ff44, 0.8);
@@ -974,62 +623,16 @@ export class GameScene extends Phaser.Scene {
         this.previewGfx.fillStyle(0xff4444, 0.3);
         this.previewGfx.lineStyle(2, 0xff4444, 0.8);
       }
-      
       this.previewGfx.fillRect(x, y, CELL, CELL);
       this.previewGfx.strokeRect(x, y, CELL, CELL);
-      
-      // Draw tower preview
-      const def = TOWER_MAP[this.selectedTowerDefId];
-      if (def && this.gridHover.valid) {
-        const elemColor = Phaser.Display.Color.HexStringToColor(
-          ELEMENT_COLORS[def.elements[0] || 'fire']
-        ).color;
-        const size = 12;
-        
-        // Semi-transparent tower preview
-        this.previewGfx.fillStyle(elemColor, 0.6);
-        const elem = def.elements[0];
-        
-        // Draw tower shape based on element
-        switch (elem) {
-          case 'fire':
-            this.previewGfx.fillTriangle(cx, cy - size, cx - size * 0.8, cy + size * 0.6, cx + size * 0.8, cy + size * 0.6);
-            break;
-          case 'water':
-            this.previewGfx.fillTriangle(cx, cy + size, cx - size * 0.8, cy - size * 0.6, cx + size * 0.8, cy - size * 0.6);
-            break;
-          case 'earth':
-            this.previewGfx.fillRect(cx - size * 0.7, cy - size * 0.7, size * 1.4, size * 1.4);
-            break;
-          case 'wind':
-            this.previewGfx.fillTriangle(cx, cy - size, cx + size, cy, cx, cy + size);
-            this.previewGfx.fillTriangle(cx, cy - size, cx - size, cy, cx, cy + size);
-            break;
-          case 'light':
-            this.previewGfx.fillCircle(cx, cy, size * 0.8);
-            break;
-          case 'dark':
-            this.previewGfx.fillCircle(cx, cy, size);
-            break;
-          default:
-            this.previewGfx.fillCircle(cx, cy, size);
-        }
-        
-        // Show range preview
-        this.previewGfx.lineStyle(1, elemColor, 0.2);
-        this.previewGfx.strokeCircle(cx, cy, def.range * CELL);
-      }
-    }
 
-    // Highlight hovered tower for selling
-    if (this.hoveredTower) {
-      const me = this.me();
-      const tower = me?.towers.find(t => t.instanceId === this.hoveredTower);
-      if (tower) {
-        const x = GRID_X + tower.position.col * CELL;
-        const y = GRID_Y + tower.position.row * CELL;
-        this.gridGfx.lineStyle(2, 0xffd93d, 0.6);
-        this.gridGfx.strokeRect(x, y, CELL, CELL);
+      // Range preview
+      const def = TOWER_MAP[this.selectedTowerDefId];
+      if (def && this.gridHover.valid && def.range > 0) {
+        const colorHex = TOWER_COLOR_HEX[def.towerType] || '#ffffff';
+        const color = Phaser.Display.Color.HexStringToColor(colorHex).color;
+        this.previewGfx.lineStyle(1, color, 0.2);
+        this.previewGfx.strokeCircle(cx, cy, def.range * CELL);
       }
     }
   }
@@ -1038,50 +641,27 @@ export class GameScene extends Phaser.Scene {
 
   private drawFX() {
     this.fxGfx.clear();
-
-    // Projectiles (scaled for 16x16 grid)
     for (const p of this.projectiles) {
       this.fxGfx.fillStyle(p.color, 0.9);
       this.fxGfx.fillCircle(p.x, p.y, p.splash ? 3 : 2);
-      // Trail
-      this.fxGfx.fillStyle(p.color, 0.3);
-      this.fxGfx.fillCircle(p.x - (p.tx - p.x) * 0.02, p.y - (p.ty - p.y) * 0.02, 1);
     }
-
-    // Death explosions
     for (const d of this.deathEffects) {
       this.fxGfx.lineStyle(2, d.color, d.alpha);
       this.fxGfx.strokeCircle(d.x, d.y, d.radius);
-      // Inner burst
       this.fxGfx.fillStyle(d.color, d.alpha * 0.3);
       this.fxGfx.fillCircle(d.x, d.y, d.radius * 0.5);
     }
-
-    // Leak flashes (scaled for 16x16 grid)
     for (const l of this.leakEffects) {
       this.fxGfx.fillStyle(0xff0000, l.alpha * 0.4);
       this.fxGfx.fillCircle(l.x, l.y, 18);
     }
-
-    // Shop flash effects
-    for (const flash of this.shopFlashEffects) {
-      const slot = this.uiShopSlots[flash.slotIndex];
-      if (slot) {
-        const bounds = slot.getBounds();
-        this.fxGfx.fillStyle(0xffd93d, flash.alpha * 0.3);
-        this.fxGfx.fillRect(bounds.x - 4, bounds.y - 4, bounds.width + 8, bounds.height + 8);
-        this.fxGfx.lineStyle(2, 0xffd93d, flash.alpha);
-        this.fxGfx.strokeRect(bounds.x - 4, bounds.y - 4, bounds.width + 8, bounds.height + 8);
-      }
-    }
   }
 
-  // ── Grid (static, drawn once) ─────────────────────────
+  // ── Grid ──────────────────────────────────────────────
 
   private drawGrid() {
     const g = this.gridGfx;
     g.clear();
-
     const me = this.me();
     const tintRGB = Phaser.Display.Color.HexStringToColor(
       me ? PLAYER_COLOR_HEX[me.color] : '#4A90D9'
@@ -1092,7 +672,6 @@ export class GameScene extends Phaser.Scene {
         const x = GRID_X + col * CELL;
         const y = GRID_Y + row * CELL;
         const onPath = isPathCell(this.mapDef, { row, col });
-
         if (onPath) {
           g.fillStyle(0x2a2a4a, 1);
         } else {
@@ -1100,7 +679,6 @@ export class GameScene extends Phaser.Scene {
           const blended = Phaser.Display.Color.Interpolate.ColorWithColor(base, tintRGB, 100, 8);
           g.fillStyle(Phaser.Display.Color.GetColor(blended.r, blended.g, blended.b), 1);
         }
-
         g.fillRect(x, y, CELL, CELL);
         g.lineStyle(1, 0x333366, 0.4);
         g.strokeRect(x, y, CELL, CELL);
@@ -1118,7 +696,6 @@ export class GameScene extends Phaser.Scene {
       );
     }
 
-    // Entry / Exit labels
     const entry = this.mapDef.entry;
     const exit = this.mapDef.exit;
     this.add.text(GRID_X + entry.col * CELL + 8, GRID_Y + entry.row * CELL + 22, '▶ IN', {
@@ -1129,7 +706,7 @@ export class GameScene extends Phaser.Scene {
     }).setDepth(0);
   }
 
-  // ── Mobs (redrawn every frame) ────────────────────────
+  // ── Mobs ──────────────────────────────────────────────
 
   private drawMobs() {
     this.mobGfx.clear();
@@ -1141,43 +718,25 @@ export class GameScene extends Phaser.Scene {
       const hpRatio = Math.max(0, mob.hp / mob.maxHp);
       const alpha = mob.visible ? 1 : 0.2;
 
-      // Size and appearance by mob type (scaled for 16x16 grid)
       let radius = 6;
       let borderColor = 0xffffff;
-      let shape: 'circle' | 'square' | 'triangle' | 'diamond' = 'circle';
+      let shape: 'circle' | 'square' | 'diamond' = 'circle';
 
-      if (mob.defId === 'boss') {
-        radius = 10;
-        borderColor = 0xffd93d;
-      } else if (mob.defId === 'tank') {
-        radius = 8;
-        borderColor = 0xff6666;
-        shape = 'square';
-      } else if (mob.defId === 'runner') {
-        radius = 5;
-        borderColor = 0x66ff66;
-        shape = 'diamond';
-      } else if (mob.defId === 'swarm') {
-        radius = 4;
-        borderColor = 0x66ccff;
-        shape = 'triangle';
-      }
+      if (mob.defId === 'boss') { radius = 10; borderColor = 0xffd93d; }
+      else if (mob.defId === 'tank') { radius = 8; borderColor = 0xff6666; shape = 'square'; }
+      else if (mob.defId === 'runner') { radius = 5; borderColor = 0x66ff66; shape = 'diamond'; }
+      else if (mob.defId === 'swarm') { radius = 4; borderColor = 0x66ccff; }
 
-      // Body color: green→yellow→red based on HP
       const r = Math.floor(255 * (1 - hpRatio));
       const gr = Math.floor(200 * hpRatio + 55);
       const bodyColor = Phaser.Display.Color.GetColor(r, gr, 50);
 
-      // Shadow
       this.mobGfx.fillStyle(0x000000, alpha * 0.3);
       this.mobGfx.fillEllipse(x + 2, y + radius + 2, radius * 1.6, radius * 0.5);
 
-      // Body shape
       this.mobGfx.fillStyle(bodyColor, alpha);
       if (shape === 'square') {
         this.mobGfx.fillRect(x - radius * 0.7, y - radius * 0.7, radius * 1.4, radius * 1.4);
-      } else if (shape === 'triangle') {
-        this.mobGfx.fillTriangle(x, y - radius, x - radius * 0.8, y + radius * 0.6, x + radius * 0.8, y + radius * 0.6);
       } else if (shape === 'diamond') {
         this.mobGfx.fillTriangle(x, y - radius, x + radius, y, x, y + radius);
         this.mobGfx.fillTriangle(x, y - radius, x - radius, y, x, y + radius);
@@ -1185,12 +744,9 @@ export class GameScene extends Phaser.Scene {
         this.mobGfx.fillCircle(x, y, radius);
       }
 
-      // Border
       this.mobGfx.lineStyle(1.5, borderColor, alpha * 0.8);
       if (shape === 'square') {
         this.mobGfx.strokeRect(x - radius * 0.7, y - radius * 0.7, radius * 1.4, radius * 1.4);
-      } else if (shape === 'triangle') {
-        this.mobGfx.strokeTriangle(x, y - radius, x - radius * 0.8, y + radius * 0.6, x + radius * 0.8, y + radius * 0.6);
       } else if (shape === 'diamond') {
         this.mobGfx.strokeTriangle(x, y - radius, x + radius, y, x, y + radius);
         this.mobGfx.strokeTriangle(x, y - radius, x - radius, y, x, y + radius);
@@ -1210,25 +766,20 @@ export class GameScene extends Phaser.Scene {
       this.mobGfx.fillRect(barX, barY, barW * hpRatio, barH);
 
       // Effect indicators
-      let effectY = y + radius + 6;
       for (const eff of mob.effects) {
         if (eff.type === 'slow' && eff.value > 0) {
           this.mobGfx.fillStyle(0x4EA8DE, 0.7);
-          this.mobGfx.fillCircle(x - 4, effectY, 3);
-        }
-        if (eff.type === 'poison') {
-          this.mobGfx.fillStyle(0x9B5DE5, 0.7);
-          this.mobGfx.fillCircle(x + 4, effectY, 3);
+          this.mobGfx.fillCircle(x - 4, y + radius + 6, 3);
         }
         if (eff.type === 'burn') {
           this.mobGfx.fillStyle(0xFF6B35, 0.7);
-          this.mobGfx.fillCircle(x, effectY, 3);
+          this.mobGfx.fillCircle(x + 4, y + radius + 6, 3);
         }
       }
     }
   }
 
-  // ── Towers (redrawn every frame) ──────────────────────
+  // ── Towers ────────────────────────────────────────────
 
   private drawTowers() {
     this.towerGfx.clear();
@@ -1241,79 +792,58 @@ export class GameScene extends Phaser.Scene {
 
       const cx = GRID_X + tower.position.col * CELL + CELL / 2;
       const cy = GRID_Y + tower.position.row * CELL + CELL / 2;
-      
-      // Use first applied element for primary color, or default gray
-      const primaryElement = tower.appliedElements[0];
-      const elemColor = primaryElement 
-        ? Phaser.Display.Color.HexStringToColor(ELEMENT_COLORS[primaryElement]).color
-        : 0x666666; // Gray for base towers
-
+      const colorHex = TOWER_COLOR_HEX[def.towerType] || '#666666';
+      const elemColor = Phaser.Display.Color.HexStringToColor(colorHex).color;
       const size = 12;
+      const stats = getTowerStats(def, tower.stars, me.augments);
 
-      // Calculate actual range using tower stats
-      const towerStats = getTowerStats(def, tower.appliedElements, me.totalBought);
-      const actualRange = towerStats.range;
-      
-      // Range circle — prominent when hovered, subtle otherwise
+      // Range circle
       const isHovered = this.hoveredTower === tower.instanceId;
-      if (isHovered) {
-        this.towerGfx.fillStyle(elemColor, 0.08);
-        this.towerGfx.fillCircle(cx, cy, actualRange * CELL);
-        this.towerGfx.lineStyle(2, elemColor, 0.5);
-        this.towerGfx.strokeCircle(cx, cy, actualRange * CELL);
-      } else {
-        this.towerGfx.lineStyle(1, elemColor, 0.08);
-        this.towerGfx.strokeCircle(cx, cy, actualRange * CELL);
+      if (stats.range > 0) {
+        if (isHovered) {
+          this.towerGfx.fillStyle(elemColor, 0.08);
+          this.towerGfx.fillCircle(cx, cy, stats.range * CELL);
+          this.towerGfx.lineStyle(2, elemColor, 0.5);
+          this.towerGfx.strokeCircle(cx, cy, stats.range * CELL);
+        } else {
+          this.towerGfx.lineStyle(1, elemColor, 0.08);
+          this.towerGfx.strokeCircle(cx, cy, stats.range * CELL);
+        }
       }
 
       // Base platform
       this.towerGfx.fillStyle(0x111122, 0.6);
       this.towerGfx.fillCircle(cx, cy + 4, size + 2);
 
-      // Tower shape by base type
+      // Tower shape by type
       this.towerGfx.fillStyle(elemColor, 0.9);
-      switch (def.id) {
-        case 'archer':
-          // Triangle (pointing up) for archers
+      switch (def.towerType) {
+        case 'arrow':
           this.towerGfx.fillTriangle(cx, cy - size, cx - size * 0.8, cy + size * 0.6, cx + size * 0.8, cy + size * 0.6);
           break;
         case 'cannon':
-          // Square for cannons
           this.towerGfx.fillRect(cx - size * 0.7, cy - size * 0.7, size * 1.4, size * 1.4);
           break;
-        case 'mage':
-          // Circle for mages
+        case 'income':
           this.towerGfx.fillCircle(cx, cy, size * 0.8);
+          // Gold symbol
+          this.towerGfx.fillStyle(0x000000, 0.5);
+          this.towerGfx.fillCircle(cx, cy, size * 0.4);
           break;
-        default:
-          this.towerGfx.fillCircle(cx, cy, size);
+        case 'pvp':
+          // Diamond shape
+          this.towerGfx.fillTriangle(cx, cy - size, cx + size, cy, cx, cy + size);
+          this.towerGfx.fillTriangle(cx, cy - size, cx - size, cy, cx, cy + size);
+          break;
       }
 
-      // Element indicators
-      if (tower.appliedElements.length > 0) {
-        // Primary element glow
-        this.towerGfx.lineStyle(2, elemColor, 0.6);
-        this.towerGfx.strokeCircle(cx, cy, size + 4);
-        
-        // Second element dot (top-right)
-        if (tower.appliedElements.length >= 2) {
-          const secondColor = Phaser.Display.Color.HexStringToColor(
-            ELEMENT_COLORS[tower.appliedElements[1]]
-          ).color;
-          this.towerGfx.fillStyle(secondColor, 0.9);
-          this.towerGfx.fillCircle(cx + size * 0.8, cy - size * 0.8, 6);
-        }
-        // Third element dot (top-left)
-        if (tower.appliedElements.length >= 3) {
-          const thirdColor = Phaser.Display.Color.HexStringToColor(
-            ELEMENT_COLORS[tower.appliedElements[2]]
-          ).color;
-          this.towerGfx.fillStyle(thirdColor, 0.9);
-          this.towerGfx.fillCircle(cx - size * 0.8, cy - size * 0.8, 6);
-          // T3 glow ring
-          this.towerGfx.lineStyle(1, 0xffd93d, 0.4);
-          this.towerGfx.strokeCircle(cx, cy, size + 7);
-        }
+      // Star indicator
+      if (tower.stars >= 1) {
+        this.towerGfx.lineStyle(2, 0xffd93d, 0.8);
+        this.towerGfx.strokeCircle(cx, cy, size + 5);
+        // Second glow
+        this.towerGfx.lineStyle(1, 0xffd93d, 0.4);
+        this.towerGfx.strokeCircle(cx, cy, size + 8);
       }
     }
   }
@@ -1324,7 +854,6 @@ export class GameScene extends Phaser.Scene {
     this.localTimer = seconds;
     if (this.timerEvent) this.timerEvent.destroy();
     if (seconds <= 0) return;
-
     this.timerEvent = this.time.addEvent({
       delay: 1000,
       repeat: seconds - 1,
@@ -1335,17 +864,12 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // ── Phase Flash ───────────────────────────────────────
-
   private showPhaseFlash(text: string) {
     const cx = GRID_X + GRID_PX / 2;
     const cy = GRID_Y + GRID_PX / 2;
     const flash = this.add.text(cx, cy, text, {
-      fontSize: '40px',
-      color: '#FFD93D',
-      fontStyle: 'bold',
-      stroke: '#000',
-      strokeThickness: 4,
+      fontSize: '40px', color: '#FFD93D', fontStyle: 'bold',
+      stroke: '#000', strokeThickness: 4,
     }).setOrigin(0.5).setDepth(10).setAlpha(1);
 
     this.tweens.add({
@@ -1355,6 +879,18 @@ export class GameScene extends Phaser.Scene {
       duration: 1200,
       ease: 'Power2',
       onComplete: () => flash.destroy(),
+    });
+  }
+
+  private updateSpeedButtons() {
+    const speeds = [1, 2, 3, 5, 10];
+    this.speedButtons.forEach((btn, i) => {
+      const s = speeds[i];
+      const active = s === this.currentSpeed;
+      btn.setStyle({
+        color: active ? '#1a1a2e' : '#ccc',
+        backgroundColor: active ? '#FFD93D' : '#2a2a3e',
+      });
     });
   }
 
@@ -1372,13 +908,7 @@ export class GameScene extends Phaser.Scene {
       fontSize: '15px', color: '#4EA8DE',
     }).setOrigin(1, 0).setDepth(5);
 
-    // Mute button (top right corner)
-    // Evolution tree button
-    const treeBtn = this.add.text(GRID_X + GRID_PX - 60, 8, '📖', {
-      fontSize: '20px',
-    }).setOrigin(1, 0).setDepth(5).setInteractive({ useHandCursor: true });
-    treeBtn.on('pointerdown', () => this.toggleEvoTree());
-
+    // Mute button
     const muteBtn = this.add.text(GRID_X + GRID_PX, 8, sfx.muted ? '🔇' : '🔊', {
       fontSize: '20px',
     }).setOrigin(1, 0).setDepth(5).setInteractive({ useHandCursor: true });
@@ -1387,7 +917,7 @@ export class GameScene extends Phaser.Scene {
       muteBtn.setText(muted ? '🔇' : '🔊');
     });
 
-    // Mob count (during combat)
+    // Mob count
     this.uiMobCount = this.add.text(GRID_X + GRID_PX, 30, '', {
       fontSize: '12px', color: '#888',
     }).setOrigin(1, 0).setDepth(5);
@@ -1405,13 +935,17 @@ export class GameScene extends Phaser.Scene {
       );
     }
 
-    this.uiHex = this.add.text(10, GRID_Y + 230, '', {
-      fontSize: '12px', color: '#D94A4A',
-      fixedWidth: 185, wordWrap: { width: 175 },
+    // Augment list (right sidebar)
+    this.uiAugmentList = this.add.text(GRID_X + GRID_PX + 10, GRID_Y, '', {
+      fontSize: '12px', color: '#ccc',
+      backgroundColor: '#1a1a2e',
+      padding: { x: 8, y: 6 },
+      wordWrap: { width: 170 },
+      lineSpacing: 4,
     }).setDepth(5);
 
     // Shop
-    this.add.text(GRID_X, shopY - 2, 'SHOP', {
+    this.add.text(GRID_X, shopY - 2, 'SHOP — Buy 3 of same type → ★ upgrade', {
       fontSize: '11px', color: '#666', fontStyle: 'bold',
     }).setDepth(5);
 
@@ -1438,14 +972,13 @@ export class GameScene extends Phaser.Scene {
     }).setDepth(5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => socket.send({ type: 'REROLL' }));
 
-    // DEV: skip shop timer
     this.add.text(btnX, shopY + 86, '▶ SEND WAVE', {
       fontSize: '13px', color: '#1a1a2e', backgroundColor: '#D94A4A',
       padding: { x: 8, y: 8 },
     }).setDepth(5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => socket.send({ type: 'DEV_START_COMBAT' }));
 
-    // Speed buttons — top right above grid
+    // Speed buttons
     const speeds = [1, 2, 3, 5, 10];
     this.speedButtons = [];
     const speedY = GRID_Y - 28;
@@ -1457,45 +990,23 @@ export class GameScene extends Phaser.Scene {
         backgroundColor: s === 1 ? '#FFD93D' : '#2a2a3e',
         padding: { x: 5, y: 4 },
       }).setDepth(5).setInteractive({ useHandCursor: true })
-        .on('pointerdown', () => {
-          socket.send({ type: 'SET_SPEED', speed: s });
-        });
+        .on('pointerdown', () => socket.send({ type: 'SET_SPEED', speed: s }));
       this.speedButtons.push(btn);
     });
 
-    // Fragment inventory bar — right side of grid
-    const rightX = GRID_X + GRID_PX + 10;
-    this.uiFragmentBar = this.add.text(rightX, GRID_Y, '', {
-      fontSize: '13px', color: '#ccc',
-      backgroundColor: '#1a1a2e',
-      padding: { x: 8, y: 6 },
-      stroke: '#333',
-      strokeThickness: 1,
-      wordWrap: { width: 170 },
-      lineSpacing: 4,
-    }).setDepth(5);
-
-    // Synergy
-    this.uiSynergy = this.add.text(GRID_X, shopY + 62, '', {
-      fontSize: '12px', color: '#aaa',
-    }).setDepth(5);
-
-    // Shop instruction text (no more bench)
-    this.add.text(GRID_X, shopY + 80, 'Click shop slot to select → Click grid to place', {
+    // Shop instruction
+    this.add.text(GRID_X, shopY + 80, 'Click shop slot → Click grid to place | Click placed tower to sell', {
       fontSize: '11px', color: '#666', fontStyle: 'bold',
     }).setDepth(5);
 
     // Tower hover tooltip
     this.uiTowerHoverInfo = this.add.text(0, 0, '', {
-      fontSize: '12px', 
-      color: '#ffffff',
+      fontSize: '12px', color: '#ffffff',
       backgroundColor: '#1a1a2e',
       padding: { x: 8, y: 6 },
-      stroke: '#ffd93d',
-      strokeThickness: 1,
+      stroke: '#ffd93d', strokeThickness: 1,
       fixedWidth: 240,
       wordWrap: { width: 220 },
-      align: 'left'
     }).setOrigin(0, 0).setDepth(10);
   }
 
@@ -1510,187 +1021,98 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < 5; i++) {
       const defId = me.shop[i];
       const isSelected = this.selectedShopIndex === i;
-      
+
       if (defId) {
         const def = TOWER_MAP[defId];
-        // Check if it's a crystal or base tower
-        // Check if it's a fragment (format: "fragment:<element>")
-        if (defId && defId.startsWith('fragment:')) {
-          const element = defId.replace('fragment:', '') as keyof typeof ELEMENT_SYMBOLS;
-          const symbol = ELEMENT_SYMBOLS[element];
-          const cost = getFragmentCost(element, me.totalBought[element] || 0);
-          const displayText = `${symbol} Fragment\n${cost}g`;
-          const textColor = isSelected ? '#ffd93d' : (ELEMENT_COLORS[element] || '#eee');
-          const bgColor = isSelected ? '#4a4a0a' : '#0f3460';
-          
-          this.uiShopSlots[i]
-            .setText(displayText)
-            .setColor(textColor)
-            .setBackgroundColor(bgColor);
-        } else if (def) {
-          const displayText = `${def.name}\n${def.cost}g`;
+        if (def) {
+          const emoji: Record<string, string> = { arrow: '🏹', cannon: '💣', income: '💰', pvp: '👹' };
+          const displayText = `${emoji[def.towerType] || ''} ${def.name}\n${def.cost}g`;
           const textColor = isSelected ? '#ffd93d' : '#eee';
           const bgColor = isSelected ? '#4a4a0a' : '#0f3460';
-          
-          this.uiShopSlots[i]
-            .setText(displayText)
-            .setColor(textColor)
-            .setBackgroundColor(bgColor);
+          this.uiShopSlots[i].setText(displayText).setColor(textColor).setBackgroundColor(bgColor);
         }
       } else {
-        this.uiShopSlots[i]
-          .setText('  — empty —')
-          .setColor('#444')
-          .setBackgroundColor('#0f3460');
+        this.uiShopSlots[i].setText('  — empty —').setColor('#444').setBackgroundColor('#0f3460');
       }
     }
 
-    // Fragment inventory display
-    const parts: string[] = [];
-    for (const elem of ELEMENTS) {
-      const sym = ELEMENT_SYMBOLS[elem];
-      const count = me.fragments[elem] || 0;
-      const bought = me.totalBought[elem] || 0;
-      let bonus = '';
-      let highlight = false;
-      
-      if (bought >= 3) {
-        bonus = ' +30%DMG';
-        highlight = true;
-      } else if (bought >= 2) {
-        bonus = ' +15%DMG'; 
-        highlight = true;
-      } else if (bought >= 1) {
-        bonus = ' UNLOCKED';
+    // Augment list
+    if (me.augments.length > 0) {
+      const augLines = ['✨ AUGMENTS'];
+      for (const augId of me.augments) {
+        const aug = AUGMENT_POOL.find(a => a.id === augId);
+        if (aug) augLines.push(`${aug.icon} ${aug.name}`);
       }
-      
-      const text = `${sym}×${count}${bonus}`;
-      const style = count > 0 ? (highlight ? `[${text}]` : text) : `${sym}×0`;
-      parts.push(style);
+      this.uiAugmentList.setText(augLines.join('\n'));
+    } else {
+      this.uiAugmentList.setText('✨ No augments yet');
     }
-    
-    let statusText = '';
-    if (this.selectedShopIndex >= 0) {
-      const defId = me.shop[this.selectedShopIndex];
-      if (defId && defId.startsWith('fragment:')) {
-        statusText = '— Click to buy fragment';
-      } else {
-        statusText = '— Click grid to place tower';
-      }
-    }
-    
-    // Update fragment inventory bar
-    this.updateFragmentBar();
-    
-    this.uiSynergy.setText(`Elements: ${parts.join('  ')}  ${statusText}`);
 
     // Opponents
     const opponents = this.gameState.players.filter((p) => p.id !== this.myId);
     opponents.forEach((opp, i) => {
       if (i < this.uiOpponents.length) {
         const status = opp.alive ? `❤️ ${opp.hp}` : '💀';
+        const augCount = opp.augments?.length || 0;
         this.uiOpponents[i]
-          .setText(`${opp.name}\n${status}`)
+          .setText(`${opp.name}\n${status}${augCount > 0 ? ` | ✨×${augCount}` : ''}`)
           .setColor(PLAYER_COLOR_HEX[opp.color]);
       }
     });
     for (let i = opponents.length; i < this.uiOpponents.length; i++) {
       this.uiOpponents[i].setText('');
     }
-
-    // Hex
-    if (me.incomingHex) {
-      this.uiHex.setText(`⚠️ HEX: ${me.incomingHex.hexId.toUpperCase()}`);
-    } else {
-      this.uiHex.setText('');
-    }
   }
 
   private updatePhaseText() {
     const me = this.me();
     const streak = me?.streak || 0;
-    const phase = this.gameState.phase === 'shopping' ? '🛒 SHOP' : '⚔️ COMBAT';
+    const phaseMap: Record<string, string> = {
+      shopping: '🛒 SHOP',
+      combat: '⚔️ COMBAT',
+      augmentPick: '✨ AUGMENT',
+    };
+    const phase = phaseMap[this.gameState.phase] || this.gameState.phase;
     const timer = this.localTimer > 0 ? `⏱ ${this.localTimer}s` : '';
     const streakText = streak > 0 ? `  🔥×${streak}` : '';
     this.uiTopRight.setText(`📍 Round ${this.gameState.round}/30  ${phase}  ${timer}${streakText}`);
   }
 
-  private updateFragmentBar() {
-    const me = this.me();
-    if (!me) return;
-
-    const lines: string[] = ['⚗️ FRAGMENTS'];
-    for (const elem of ELEMENTS) {
-      const symbol = ELEMENT_SYMBOLS[elem];
-      const count = me.fragments[elem] || 0;
-      const bought = me.totalBought[elem] || 0;
-      const bar = count > 0 ? '█'.repeat(count) : '—';
-      const bonus = bought >= 3 ? ' +30%' : bought >= 2 ? ' +15%' : '';
-      lines.push(`${symbol} ×${count} ${bar}${bonus}`);
-    }
-    
-    this.uiFragmentBar.setText(lines.join('\n'));
-  }
-
   // ── Actions ───────────────────────────────────────────
 
   private selectShopSlot(shopIndex: number) {
-    if (this.gameState.phase === 'gameOver' || this.gameState.phase === 'lobby') return;
+    if (this.gameState.phase !== 'shopping') return;
     const me = this.me();
     if (!me || !me.shop[shopIndex]) return;
-    
-    const defId = me.shop[shopIndex];
-    
-    // If it's a fragment, buy it directly
-    if (defId && defId.startsWith('fragment:')) {
-      const element = defId.replace('fragment:', '') as Element;
-      const cost = getFragmentCost(element, me.totalBought[element] || 0);
-      
-      if (me.gold >= cost) {
-        socket.send({ type: 'BUY_FRAGMENT', shopIndex });
-        // Visual feedback would be nice here
-      }
-      return;
-    }
-    
-    // Otherwise it's a tower, handle selection for placement
+
     if (this.selectedShopIndex === shopIndex) {
       this.selectedShopIndex = -1;
       this.selectedTowerDefId = null;
     } else {
       this.selectedShopIndex = shopIndex;
-      this.selectedTowerDefId = defId;
+      this.selectedTowerDefId = me.shop[shopIndex];
     }
-    
     this.updateUI();
   }
 
   private onGridClick(pos: GridPos) {
-    if (this.gameState.phase === 'gameOver' || this.gameState.phase === 'lobby') return;
+    if (this.gameState.phase !== 'shopping') return;
     const me = this.me();
     if (!me) return;
 
-    // Check if clicking on a tower → open upgrade menu (not sell!)
+    // Click on existing tower = sell
     const existingTower = me.towers.find(t => t.position.row === pos.row && t.position.col === pos.col);
     if (existingTower) {
-      const x = GRID_X + pos.col * CELL + CELL / 2;
-      const y = GRID_Y + pos.row * CELL + CELL / 2;
-      this.showUpgradeMenu(existingTower, x, y);
+      socket.send({ type: 'SELL_TOWER', instanceId: existingTower.instanceId });
       return;
     }
 
-    // Check if trying to place a tower from shop
+    // Place tower from shop
     if (this.selectedShopIndex < 0 || !this.selectedTowerDefId) return;
     if (isPathCell(this.mapDef, pos)) return;
-    
-    socket.send({ 
-      type: 'BUY_AND_PLACE', 
-      shopIndex: this.selectedShopIndex, 
-      position: pos 
-    });
+
+    socket.send({ type: 'BUY_AND_PLACE', shopIndex: this.selectedShopIndex, position: pos });
     sfx.towerPlace();
-    
-    // Deselect after placement attempt
     this.selectedShopIndex = -1;
     this.selectedTowerDefId = null;
     this.updateUI();
@@ -1702,39 +1124,30 @@ export class GameScene extends Phaser.Scene {
     this.miniGfx.clear();
     const opponents = this.gameState.players.filter(p => p.id !== this.myId && p.alive);
     const miniCell = 6;
-    const miniSize = miniCell * GRID_SIZE; // 48px
+    const miniSize = miniCell * GRID_SIZE;
 
     opponents.forEach((opp, idx) => {
       const baseX = GRID_X + GRID_PX + 20;
-      const baseY = GRID_Y + idx * (miniSize + 50);
+      const baseY = GRID_Y + 120 + idx * (miniSize + 50);
 
-      // Background
       this.miniGfx.fillStyle(0x0a0a1e, 0.8);
       this.miniGfx.fillRect(baseX - 2, baseY - 2, miniSize + 4, miniSize + 4);
       this.miniGfx.lineStyle(1, Phaser.Display.Color.HexStringToColor(PLAYER_COLOR_HEX[opp.color]).color, 0.6);
       this.miniGfx.strokeRect(baseX - 2, baseY - 2, miniSize + 4, miniSize + 4);
 
-      // Draw path cells
       for (const cell of this.mapDef.path) {
         this.miniGfx.fillStyle(0x2a2a4a, 0.5);
         this.miniGfx.fillRect(baseX + cell.col * miniCell, baseY + cell.row * miniCell, miniCell, miniCell);
       }
 
-      // Draw towers
       for (const tower of opp.towers) {
-        const primaryElement = tower.appliedElements[0];
-        const elemColor = primaryElement
-          ? Phaser.Display.Color.HexStringToColor(ELEMENT_COLORS[primaryElement]).color
-          : 0x666666; // Gray for base towers
+        const def = TOWER_MAP[tower.defId];
+        const colorHex = def ? TOWER_COLOR_HEX[def.towerType] : '#666666';
+        const elemColor = Phaser.Display.Color.HexStringToColor(colorHex).color;
         this.miniGfx.fillStyle(elemColor, 0.9);
-        this.miniGfx.fillRect(
-          baseX + tower.position.col * miniCell + 1,
-          baseY + tower.position.row * miniCell + 1,
-          miniCell - 2, miniCell - 2
-        );
+        this.miniGfx.fillRect(baseX + tower.position.col * miniCell + 1, baseY + tower.position.row * miniCell + 1, miniCell - 2, miniCell - 2);
       }
 
-      // Draw mobs as tiny dots
       const oppMobs = this.gameState.mobs[opp.id] || [];
       for (const mob of oppMobs) {
         this.miniGfx.fillStyle(0xff4444, 0.8);
