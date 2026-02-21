@@ -108,7 +108,7 @@ export class Game {
 
     switch (msg.type) {
       case 'BUY_AND_PLACE': {
-        if (this.state.phase !== 'shopping') return;
+        
         if (msg.shopIndex < 0 || msg.shopIndex >= SHOP_SLOTS) return;
         const itemId = player.shop[msg.shopIndex];
         if (!itemId) return;
@@ -133,7 +133,7 @@ export class Game {
           instanceId: nanoid(8),
           defId: itemId,
           position: msg.position,
-          stars: 0,
+          stars: 1,
           element: getsElement ? activeElement : undefined,
         };
         player.towers.push(tower);
@@ -148,14 +148,14 @@ export class Game {
         break;
       }
       case 'SELL_TOWER': {
-        if (this.state.phase !== 'shopping') return;
+        
         if (this.shop.sellTower(player, msg.instanceId)) {
           this.broadcastStateUpdate();
         }
         break;
       }
       case 'REROLL': {
-        if (this.state.phase !== 'shopping') return;
+        
         if (this.shop.reroll(player)) {
           this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
         }

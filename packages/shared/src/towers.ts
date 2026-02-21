@@ -76,7 +76,8 @@ export function getTowerStats(
   element?: Element,
   elementTier?: number,
 ): TowerStats {
-  const starMult = stars >= 1 ? 2 : 1; // ★ = 2x stats
+  // stars: 1=T1 (1x), 2=T2 (2x), 3=T3 (3x)
+  const starMult = stars >= 3 ? 3 : stars >= 2 ? 2 : 1;
 
   let damage = def.damage * starMult;
   let attackSpeed = def.attackSpeed * starMult;
@@ -115,7 +116,7 @@ export function getTowerStats(
     splashRadius *= asteroidBonus;
   }
 
-  const starLabel = stars >= 1 ? ' ★' : '';
+  const starLabel = stars >= 3 ? ' ★★★' : stars >= 2 ? ' ★★' : '';
   const elemLabel = element ? ` [${element.charAt(0).toUpperCase() + element.slice(1)}]` : '';
   return {
     damage: Math.round(damage * 10) / 10,

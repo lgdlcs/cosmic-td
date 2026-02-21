@@ -39,8 +39,9 @@ export interface TowerInstance {
   instanceId: string;
   defId: string;        // tower def id (arrow, cannon, income, pvp)
   position: GridPos;
-  stars: number;        // 0 = base, 1 = ★ (fused from 3)
+  stars: TowerTier;     // 1 = base, 2 = ★★ (upgraded), 3 = ★★★
   element?: Element;    // assigned when player picks an element augment
+  canUpgrade?: boolean; // server-computed: can this tower be upgraded?
 }
 
 // ── Mob ─────────────────────────────────────────────────
@@ -87,6 +88,7 @@ export interface PlayerState {
   shop: (string | null)[];    // 5 shop slots, tower defIds or null
   augments: string[];         // picked augment IDs
   elements: Element[];        // collected element augments (ordered)
+  activeCombo?: string;       // active combo ID (e.g., 'PLASMA')
   streak: number;
   alive: boolean;
 }
@@ -133,6 +135,7 @@ export type ClientMsg =
   | { type: 'SELL_TOWER'; instanceId: string }
   | { type: 'REROLL' }
   | { type: 'PICK_AUGMENT'; augmentId: string }
+  | { type: 'UPGRADE_TOWER'; towerId: string }
   | { type: 'DEV_START_COMBAT' }
   | { type: 'SET_SPEED'; speed: number };
 
@@ -152,6 +155,8 @@ export type ServerMsg =
   | { type: 'MOB_LEAKED'; playerId: string; mobId: string; damage: number; sentTo: string }
   | { type: 'AUGMENT_CHOICES'; choices: { id: string; name: string; description: string; icon: string; tier: number }[] }
   | { type: 'AUGMENT_PICKED'; playerId: string; augmentId: string }
+  | { type: 'TOWER_UPGRADED'; playerId: string; towerId: string; newTier: TowerTier }
+  | { type: 'COMBO_UNLOCKED'; playerId: string; comboId: string; comboName: string; comboColor: string }
   | { type: 'PLAYER_ELIMINATED'; playerId: string }
   | { type: 'GAME_OVER'; winnerId: string }
   | { type: 'ERROR'; message: string };

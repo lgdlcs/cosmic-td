@@ -1174,7 +1174,7 @@ export class GameScene extends Phaser.Scene {
   // ── Actions ───────────────────────────────────────────
 
   private selectShopSlot(shopIndex: number) {
-    if (this.gameState.phase !== 'shopping') return;
+    
     const me = this.me();
     if (!me || !me.shop[shopIndex]) return;
 
@@ -1189,7 +1189,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onGridClick(pos: GridPos) {
-    if (this.gameState.phase !== 'shopping') return;
+    
     const me = this.me();
     if (!me) return;
 

@@ -81,45 +81,7 @@ export function getEffectiveness(towerElement: Element | undefined, mobElement: 
   return 'neutral';
 }
 
-// ── Dual Element Combinations ───────────────────────────
-
-export interface ElementCombo {
-  elements: [Element, Element];
-  name: string;
-  emoji: string;
-}
-
-export const ELEMENT_COMBOS: ElementCombo[] = [
-  { elements: ['solar', 'cryo'], name: 'Plasma', emoji: '♨️' },
-  { elements: ['solar', 'asteroid'], name: 'Magma Core', emoji: '🌋' },
-  { elements: ['solar', 'nebula'], name: 'Supernova', emoji: '💥' },
-  { elements: ['solar', 'void'], name: 'Dark Star', emoji: '🌑' },
-  { elements: ['solar', 'photon'], name: 'Radiance', emoji: '🌞' },
-  { elements: ['solar', 'bio'], name: 'Photosynthesis', emoji: '🌱' },
-  { elements: ['cryo', 'asteroid'], name: 'Comet', emoji: '☄️' },
-  { elements: ['cryo', 'nebula'], name: 'Ice Storm', emoji: '🌊' },
-  { elements: ['cryo', 'void'], name: 'Absolute Zero', emoji: '🕳️' },
-  { elements: ['cryo', 'photon'], name: 'Prism', emoji: '❄️' },
-  { elements: ['cryo', 'bio'], name: 'Cryogenics', emoji: '🧪' },
-  { elements: ['asteroid', 'void'], name: 'Singularity', emoji: '⬛' },
-  { elements: ['asteroid', 'photon'], name: 'Crystal', emoji: '💎' },
-  { elements: ['asteroid', 'bio'], name: 'Terraform', emoji: '🌲' },
-  { elements: ['asteroid', 'nebula'], name: 'Dust Cloud', emoji: '🌪️' },
-  { elements: ['void', 'photon'], name: 'Eclipse', emoji: '🌓' },
-  { elements: ['void', 'bio'], name: 'Entropy', emoji: '🍂' },
-  { elements: ['void', 'nebula'], name: 'Dark Matter', emoji: '👤' },
-  { elements: ['photon', 'bio'], name: 'Genesis', emoji: '✨' },
-  { elements: ['photon', 'nebula'], name: 'Pulsar', emoji: '⚡' },
-  { elements: ['bio', 'nebula'], name: 'Spore Cloud', emoji: '🍃' },
-];
-
-/** Find combo for two elements (order doesn't matter) */
-export function getElementCombo(a: Element, b: Element): ElementCombo | undefined {
-  return ELEMENT_COMBOS.find(c =>
-    (c.elements[0] === a && c.elements[1] === b) ||
-    (c.elements[0] === b && c.elements[1] === a)
-  );
-}
+// Dual element combos are defined in combos.ts
 
 /** Get a random element */
 export function randomElement(): Element {
