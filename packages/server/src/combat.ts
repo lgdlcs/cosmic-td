@@ -701,7 +701,7 @@ export class CombatManager {
     // Tower attacks (only arrow and cannon towers attack)
     for (const tower of player.towers) {
       const def = TOWER_MAP[tower.defId];
-      if (!def || def.towerType === 'income' || def.towerType === 'pvp') continue;
+      if (!def || def.towerType === 'pvp') continue;
 
       // Cooldown
       const cd = this.cooldowns.get(tower.instanceId) || 0;
@@ -710,7 +710,10 @@ export class CombatManager {
         continue;
       }
 
-      const towerStats = getTowerStats(def, tower.stars, player.augments, playerElement, elemTier);
+      // Per-tower element (falls back to player element for backward compat)
+      const towerElem = tower.element || playerElement;
+      const towerElemTier = tower.combo ? 2 : (towerElem ? 1 : 0);
+      const towerStats = getTowerStats(def, tower.stars, player.augments, towerElem, towerElemTier);
       
       // Find target in range
       const inRange = remaining.filter((m) => {
@@ -728,13 +731,13 @@ export class CombatManager {
       let finalDamage = towerStats.damage;
       
       // Element multiplier (AURORA combo always hits strong)
-      const activeCombo = player.activeCombo ? COMBO_MAP[player.activeCombo] : undefined;
-      const isAurora = activeCombo?.effect.type === 'cycle_element';
-      const elemMult = isAurora ? 2.0 : getElementMultiplier(playerElement, target.element);
+      const towerCombo = tower.combo ? COMBO_MAP[tower.combo] : undefined;
+      const isAurora = towerCombo?.effect.type === 'cycle_element';
+      const elemMult = isAurora ? 2.0 : getElementMultiplier(towerElem, target.element);
       finalDamage *= elemMult;
 
       // Armor reduction from dark cannon (DARK_MATTER ignores armor)
-      const isDarkMatter = activeCombo?.effect.type === 'ignore_armor';
+      const isDarkMatter = towerCombo?.effect.type === 'ignore_armor';
       const armorReduce = isDarkMatter ? 0 : target.effects
         .filter(e => e.type === 'armorReduce')
         .reduce((sum, e) => sum + e.value, 0);
@@ -743,10 +746,10 @@ export class CombatManager {
       }
 
       // Photon Blaster: photon cascade consecutive hit bonus
-      if (playerElement === 'photon' && def.towerType === 'arrow') {
+      if (towerElem === "photon" && def.towerType === "arrow") {
         const towerHits = this.consecutiveHits.get(tower.instanceId);
         const hits = towerHits?.get(target.instanceId) || 0;
-        const bonus = elemTier >= 2 ? 0.08 : 0.05;
+        const bonus = towerElemTier >= 2 ? 0.08 : 0.05;
         finalDamage *= (1 + hits * bonus);
       }
 
@@ -764,14 +767,14 @@ export class CombatManager {
         for (const st of splashTargets) {
           let splashDmg = finalDamage * 0.5;
           // Element multiplier for splash targets too
-          const stMult = getElementMultiplier(playerElement, st.element);
+          const stMult = getElementMultiplier(towerElem, st.element);
           splashDmg = (towerStats.damage * 0.5) * stMult;
           st.hp -= splashDmg;
         }
       }
 
       // Apply elemental effects
-      this.applyElementalEffects(tower, target, playerElement, elemTier, finalDamage, remaining, player);
+      this.applyElementalEffects(tower, target, towerElem, towerElemTier, finalDamage, remaining, player);
 
       // Apply combo effects
       this.applyComboEffects(player, tower, target, finalDamage, remaining);
@@ -781,7 +784,7 @@ export class CombatManager {
         this.cooldowns.set(tower.instanceId, 1000 / towerStats.attackSpeed);
       }
 
-      const effectiveness = getEffectiveness(playerElement, target.element);
+      const effectiveness = getEffectiveness(towerElem, target.element);
 
       attacks.push({
         towerId: tower.instanceId,
@@ -792,7 +795,7 @@ export class CombatManager {
         targetY: target.y,
         damage: finalDamage,
         element: def.towerType,
-        towerElement: playerElement,
+        towerElement: towerElem,
         mobElement: target.element,
         effectiveness,
         splash: !!(splashRadius && splashRadius > 0),

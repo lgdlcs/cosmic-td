@@ -50,7 +50,7 @@ export const SELL_REFUND_RATIO = 0.7;
 export const TOWER_COLOR_HEX: Record<TowerType, string> = {
   arrow: '#4EA8DE',
   cannon: '#FF6B35',
-  income: '#FFD93D',
+  income: '#ffc107',
   pvp: '#9B5DE5',
 };
 

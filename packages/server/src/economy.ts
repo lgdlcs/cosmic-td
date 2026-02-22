@@ -47,15 +47,6 @@ export class EconomyManager {
       income += 3;
     }
 
-    // Income towers: generate gold
-    for (const tower of player.towers) {
-      const def = TOWER_MAP[tower.defId];
-      if (def && def.towerType === 'income') {
-        const stats = getTowerStats(def, tower.stars, player.augments);
-        income += stats.incomePerRound || 0;
-      }
-    }
-
     player.gold += income;
   }
 

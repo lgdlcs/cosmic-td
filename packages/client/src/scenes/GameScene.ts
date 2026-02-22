@@ -32,6 +32,7 @@ import {
 } from '@ect/shared';
 import type { Element, TowerTier } from '@ect/shared';
 import type { ElementCombo } from '@ect/shared';
+import { findCombo, ALL_ELEMENTS } from '@ect/shared';
 
 // ── Procedural Sound Effects (Web Audio API) ───────────
 
@@ -96,7 +97,7 @@ const GRID_PX = CELL * GRID_SIZE;
 const SHOP_TOWER_COLORS: Record<string, string> = {
   arrow: '#00d4ff',   // Blaster: cyan
   cannon: '#ff6b00',  // Railgun: red-orange
-  income: '#ffc107',  // Mining Probe: gold
+  income: '#ffc107',  // Arcane Tower: yellow
   pvp: '#7b2fbe',     // Warp Gate: purple
 };
 
@@ -188,9 +189,11 @@ export class GameScene extends Phaser.Scene {
   private shopSlotGraphics: Phaser.GameObjects.Graphics | null = null;
   private shopSlotGlowTimers: number[] = [0, 0, 0, 0, 0];
 
-  // UI
-  private uiTopLeft!: Phaser.GameObjects.Text;
-  private uiTopRight!: Phaser.GameObjects.Text;
+  // UI — DOM HUD overlay
+  private hudEl: HTMLDivElement | null = null;
+  private hudLeft: HTMLSpanElement | null = null;
+  private hudCenter: HTMLSpanElement | null = null;
+  private hudRight: HTMLSpanElement | null = null;
   private uiShopSlots: Phaser.GameObjects.Text[] = [];
   private uiAugmentList!: Phaser.GameObjects.Text;
   private uiOpponents: Phaser.GameObjects.Text[] = [];
@@ -269,13 +272,11 @@ export class GameScene extends Phaser.Scene {
 
     // Feature 1: TFT-style keyboard shortcuts
     this.input.keyboard?.on('keydown-D', () => {
-      if (this.gameState.phase === 'shopping') {
-        socket.send({ type: 'REROLL' });
-      }
+      socket.send({ type: 'REROLL' });
     });
 
     this.input.keyboard?.on('keydown-E', () => {
-      if (this.gameState.phase === 'shopping' && this.selectedTowerId) {
+      if (this.selectedTowerId) {
         socket.send({ type: 'SELL_TOWER', instanceId: this.selectedTowerId });
         this.selectedTowerId = null;
         this.hideTowerActionMenu();
@@ -291,9 +292,7 @@ export class GameScene extends Phaser.Scene {
     // Feature 1: Shop slot selection (1-5)
     for (let i = 1; i <= 5; i++) {
       this.input.keyboard?.on(`keydown-${i}`, () => {
-        if (this.gameState.phase === 'shopping') {
-          this.selectShopSlot(i - 1);
-        }
+        this.selectShopSlot(i - 1);
       });
     }
 
@@ -315,6 +314,7 @@ export class GameScene extends Phaser.Scene {
     if (this.towerActionMenu) this.towerActionMenu.destroy();
     if (this.pvpPanel) this.pvpPanel.destroy();
     if (this.techTreeOverlay) this.techTreeOverlay.destroy();
+    this.destroyHUD();
   }
 
   update(_time: number, delta: number) {
@@ -341,10 +341,14 @@ export class GameScene extends Phaser.Scene {
 
   private handleMsg(msg: ServerMsg) {
     switch (msg.type) {
-      case 'STATE_UPDATE':
+      case 'STATE_UPDATE': {
+        const hadColor = !!this.me();
         this.gameState = msg.state;
+        // Redraw grid on first state with player color
+        if (!hadColor && this.me()) this.drawGrid();
         this.updateUI();
         break;
+      }
 
       case 'PHASE_CHANGE':
         this.gameState.phase = msg.phase;
@@ -425,6 +429,12 @@ export class GameScene extends Phaser.Scene {
         }
         break;
       }
+
+      case 'ELEMENT_APPLIED':
+        if (msg.playerId === this.myId) {
+          this.hideTowerActionMenu();
+        }
+        break;
 
       case 'SPEED_CHANGE':
         this.currentSpeed = msg.speed;
@@ -594,12 +604,15 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (kills.length > 0) sfx.mobDeath();
-    if (kills.length > 0) sfx.goldReceived();
+    const hasGold = kills.some(k => k.gold > 0);
+    if (hasGold) sfx.goldReceived();
     for (const kill of kills) {
       const mx = GRID_X + kill.x * CELL + CELL / 2;
       const my = GRID_Y + kill.y * CELL + CELL / 2;
       this.deathEffects.push({ x: mx, y: my, radius: 8, alpha: 1, color: 0xFFD93D });
-      this.spawnFloatingText(mx + (Math.random() - 0.5) * 10, my - 15, `+${kill.gold}g`, -30);
+      if (kill.gold > 0) {
+        this.spawnFloatingText(mx + (Math.random() - 0.5) * 10, my - 15, `+${kill.gold}g`, -30);
+      }
     }
 
     if (leaks.length > 0) sfx.leak();
@@ -725,7 +738,7 @@ export class GameScene extends Phaser.Scene {
           if (stats.incomePerRound) info += `Income: +${stats.incomePerRound}g/round\n`;
           if (stats.mobPower) info += `PvP Power: ${stats.mobPower}\n`;
 
-          if (this.gameState.phase === 'shopping') {
+          {
             if (tower.canUpgrade) {
               info += `\n⬆ Click to UPGRADE`;
             } else {
@@ -802,9 +815,18 @@ export class GameScene extends Phaser.Scene {
 
   // ── Grid ──────────────────────────────────────────────
 
+  private getMyColorHex(): number {
+    const me = this.me();
+    if (!me) return 0x00d4ff;
+    const map: Record<string, number> = { blue: 0x4A90D9, red: 0xD94A4A, green: 0x4AD97A, orange: 0xD9A04A };
+    return map[me.color] || 0x00d4ff;
+  }
+
   private drawGrid() {
     const g = this.gridGfx;
     g.clear();
+
+    const pColor = this.getMyColorHex();
 
     // Deep space background
     g.fillStyle(0x0a0a14, 1);
@@ -816,17 +838,17 @@ export class GameScene extends Phaser.Scene {
         const y = GRID_Y + row * CELL;
         const onPath = isPathCell(this.mapDef, { row, col });
         if (onPath) {
-          // Metallic dark path with subtle glow edges
+          // Metallic dark path with player color glow edges
           g.fillStyle(0x15152a, 1);
           g.fillRect(x, y, CELL, CELL);
-          g.lineStyle(1, 0x00d4ff, 0.08);
+          g.lineStyle(1, pColor, 0.12);
           g.strokeRect(x + 1, y + 1, CELL - 2, CELL - 2);
         } else {
           // Placeable tiles - slightly lighter with grid dots
           g.fillStyle(0x0e0e20, 1);
           g.fillRect(x, y, CELL, CELL);
-          // Grid dot
-          g.fillStyle(0x2a2a4a, 0.4);
+          // Grid dot in player color
+          g.fillStyle(pColor, 0.25);
           g.fillCircle(x + CELL / 2, y + CELL / 2, 1);
         }
         g.lineStyle(1, 0x1a1a3a, 0.5);
@@ -834,8 +856,8 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Path lines - subtle cyan glow
-    g.lineStyle(2, 0x00d4ff, 0.15);
+    // Path lines - player color glow
+    g.lineStyle(2, pColor, 0.2);
     for (let i = 0; i < this.mapDef.path.length - 1; i++) {
       const a = this.mapDef.path[i];
       const b = this.mapDef.path[i + 1];
@@ -854,10 +876,10 @@ export class GameScene extends Phaser.Scene {
       g.fillCircle(sx, sy, Math.random() < 0.3 ? 1.5 : 0.8);
     }
 
-    // Nebula glow patches
-    g.fillStyle(0x7b2fbe, 0.03);
+    // Nebula glow patches in player color
+    g.fillStyle(pColor, 0.04);
     g.fillCircle(GRID_X + GRID_PX * 0.3, GRID_Y + GRID_PX * 0.2, 60);
-    g.fillStyle(0x00d4ff, 0.02);
+    g.fillStyle(pColor, 0.03);
     g.fillCircle(GRID_X + GRID_PX * 0.7, GRID_Y + GRID_PX * 0.8, 80);
 
     const entry = this.mapDef.entry;
@@ -982,10 +1004,10 @@ export class GameScene extends Phaser.Scene {
 
       const cx = GRID_X + tower.position.col * CELL + CELL / 2;
       const cy = GRID_Y + tower.position.row * CELL + CELL / 2;
-      // Use combo color if active, otherwise element/tower color
+      // Use tower's own combo/element color, or default tower color
       let colorHex = getTowerDisplayColor(def.towerType, tower.element);
-      if (me.activeCombo && (def.towerType === 'arrow' || def.towerType === 'cannon')) {
-        const combo = COMBO_MAP[me.activeCombo];
+      if (tower.combo) {
+        const combo = COMBO_MAP[tower.combo];
         if (combo) colorHex = combo.color;
       }
       const elemColor = Phaser.Display.Color.HexStringToColor(colorHex).color;
@@ -1076,7 +1098,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       // canUpgrade indicator: green pulsing border
-      if (tower.canUpgrade && this.gameState.phase === 'shopping') {
+      if (tower.canUpgrade) {
         const pulse = 0.4 + 0.4 * Math.sin(Date.now() / 300);
         this.towerGfx.lineStyle(2, 0x44ff44, pulse);
         this.towerGfx.strokeCircle(cx, cy, size + 6);
@@ -1148,14 +1170,8 @@ export class GameScene extends Phaser.Scene {
   private createUI() {
     const shopY = GRID_Y + GRID_PX + 12;
 
-    // Top bar
-    this.uiTopLeft = this.add.text(GRID_X, 10, '', {
-      fontSize: '15px', color: '#ffc107', fontStyle: 'bold',
-    }).setDepth(5);
-
-    this.uiTopRight = this.add.text(GRID_X + GRID_PX - 40, 10, '', {
-      fontSize: '15px', color: '#00d4ff',
-    }).setOrigin(1, 0).setDepth(5);
+    // Top bar — DOM overlay with flexbox
+    this.createHUD();
 
     // Mute button
     const muteBtn = this.add.text(GRID_X + GRID_PX, 8, sfx.muted ? '🔇' : '🔊', {
@@ -1274,11 +1290,53 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(0, 0).setDepth(10);
   }
 
+  private createHUD() {
+    this.destroyHUD();
+    const hud = document.createElement('div');
+    hud.id = 'game-hud';
+    Object.assign(hud.style, {
+      position: 'absolute', top: '0', left: '0',
+      display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap',
+      gap: '4px 16px', padding: '8px 12px', width: '100%',
+      zIndex: '10', pointerEvents: 'none',
+      fontFamily: 'monospace', color: '#e0e8ff', fontSize: '14px',
+      background: 'rgba(10,10,20,0.8)',
+    });
+    const left = document.createElement('span');
+    left.style.color = '#ffc107';
+    left.style.fontWeight = 'bold';
+    const center = document.createElement('span');
+    center.style.color = '#00d4ff';
+    const right = document.createElement('span');
+    right.style.color = '#aabbdd';
+    right.style.textAlign = 'right';
+    hud.append(left, center, right);
+    const container = this.game.canvas.parentElement;
+    if (container) {
+      container.style.position = 'relative';
+      container.appendChild(hud);
+    }
+    this.hudEl = hud;
+    this.hudLeft = left;
+    this.hudCenter = center;
+    this.hudRight = right;
+  }
+
+  private destroyHUD() {
+    if (this.hudEl) {
+      this.hudEl.remove();
+      this.hudEl = null;
+      this.hudLeft = null;
+      this.hudCenter = null;
+      this.hudRight = null;
+    }
+  }
+
   private updateUI() {
     const me = this.me();
     if (!me) return;
 
-    this.uiTopLeft.setText(`❤️ ${me.hp}   💰 ${me.gold}`);
+    if (this.hudLeft) this.hudLeft.textContent = `❤️ ${me.hp}   💰 ${me.gold}`;
     this.updatePhaseText();
 
     // Shop (Feature 2: colored squares, no emojis)
@@ -1364,25 +1422,26 @@ export class GameScene extends Phaser.Scene {
     };
     const phase = phaseMap[this.gameState.phase] || this.gameState.phase;
     const timer = this.localTimer > 0 ? `⏱ ${this.localTimer}s` : '';
-    const streakText = streak > 0 ? `  🔥×${streak}` : '';
+    const streakText = streak > 0 ? `🔥×${streak}` : '';
     
-    // Feature 2: Add next wave info to top bar
-    let nextWaveText = '';
+    if (this.hudCenter) {
+      this.hudCenter.textContent = `📍 Round ${this.gameState.round}/30  ${phase}  ${timer}`;
+    }
+
+    // Feature 2: Next wave info + streak in right section
+    let rightText = '';
+    if (streakText) rightText += streakText + '  ';
     if (this.nextWaveInfo && this.gameState.phase === 'shopping') {
       const typeIcons: Record<string, string> = {
-        boss: '👑',
-        tank: '🛡️',
-        runner: '🏃',
-        swarm: '🐛',
+        boss: '👑', tank: '🛡️', runner: '🏃', swarm: '🐛',
       };
       const icon = typeIcons[this.nextWaveInfo.mobType] || '👹';
       const elementText = this.nextWaveInfo.element ? 
-        ` — ${ELEMENT_EMOJI[this.nextWaveInfo.element] || '?'} ${this.nextWaveInfo.element}` : 
-        (this.gameState.round >= 2 ? ' — Random' : '');
-      nextWaveText = `  | Next: ${icon} ${this.nextWaveInfo.mobType} ×${this.nextWaveInfo.count} — HP: ${this.nextWaveInfo.hp}${elementText}`;
+        ` ${ELEMENT_EMOJI[this.nextWaveInfo.element] || '?'} ${this.nextWaveInfo.element}` : 
+        (this.gameState.round >= 2 ? ' Random' : '');
+      rightText += `Next: ${icon} ${this.nextWaveInfo.mobType} ×${this.nextWaveInfo.count} HP:${this.nextWaveInfo.hp}${elementText}`;
     }
-    
-    this.uiTopRight.setText(`📍 Round ${this.gameState.round}/30  ${phase}  ${timer}${streakText}${nextWaveText}`);
+    if (this.hudRight) this.hudRight.textContent = rightText;
   }
 
   // ── Actions ───────────────────────────────────────────
@@ -1493,56 +1552,140 @@ export class GameScene extends Phaser.Scene {
     
     this.towerActionMenu = this.add.container(0, 0).setDepth(20);
     
-    // Background panel
-    const panelW = 120;
-    const panelH = tower.canUpgrade && this.gameState.phase === 'shopping' ? 100 : 80;
-    const panel = this.add.rectangle(x + 50, y - 10, panelW, panelH, 0x0d1117, 0.95);
+    const copies = tower.stars >= 3 ? 9 : tower.stars >= 2 ? 3 : 1;
+    const sellPrice = Math.floor(def.cost * copies * 0.7);
+    const canUpgrade = tower.canUpgrade;
+    const canApplyElement = def.towerType === 'arrow' || def.towerType === 'cannon';
+    
+    // Collect unlocked combos
+    const unlockedCombos: ElementCombo[] = [];
+    if (me.elements.length >= 2) {
+      for (let i = 0; i < me.elements.length; i++) {
+        for (let j = i + 1; j < me.elements.length; j++) {
+          const combo = findCombo(me.elements[i], me.elements[j]);
+          if (combo && !unlockedCombos.find(c => c.id === combo.id)) {
+            unlockedCombos.push(combo);
+          }
+        }
+      }
+    }
+    // Unique elements the player has unlocked
+    const uniqueElements = [...new Set(me.elements)];
+    
+    // Calculate panel size
+    const elementRowCount = canApplyElement ? Math.ceil((uniqueElements.length + unlockedCombos.length) / 4) : 0;
+    const panelW = 180;
+    const panelH = 40 + (elementRowCount > 0 ? 10 + elementRowCount * 28 : 0);
+    const panelX = Math.min(x + 70, GRID_X + GRID_PX - panelW / 2);
+    const panelY = Math.max(y - panelH / 2, GRID_Y + panelH / 2);
+    
+    const panel = this.add.rectangle(panelX, panelY, panelW, panelH, 0x0d1117, 0.95);
     panel.setStrokeStyle(2, 0x00d4ff, 0.8);
     this.towerActionMenu.add(panel);
     
-    let btnY = y - 35;
-    const btnSpacing = 25;
+    // Row 1: Sell + Upgrade
+    const row1Y = panelY - panelH / 2 + 18;
     
-    // Upgrade button (only if can upgrade and shopping phase)
-    if (tower.canUpgrade && this.gameState.phase === 'shopping') {
-      const upgradeBtn = this.add.text(x + 50, btnY, '⬆ UPGRADE', {
-        fontSize: '12px', color: '#0a0a14', backgroundColor: '#44ff44',
-        padding: { x: 6, y: 4 }, fontStyle: 'bold',
-      }).setOrigin(0.5).setInteractive({ useHandCursor: true })
+    const sellBtn = this.add.text(panelX - panelW / 2 + 8, row1Y, `SELL ${sellPrice}g`, {
+      fontSize: '11px', color: '#fff', backgroundColor: '#cc3333',
+      padding: { x: 6, y: 4 }, fontStyle: 'bold',
+    }).setOrigin(0, 0.5).setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => {
+        socket.send({ type: 'SELL_TOWER', instanceId: towerId });
+        this.selectedTowerId = null;
+        this.hideTowerActionMenu();
+        this.updateUI();
+      });
+    this.towerActionMenu.add(sellBtn);
+    
+    const upColor = canUpgrade ? '#33aa33' : '#333344';
+    const upTextColor = canUpgrade ? '#fff' : '#666';
+    const upgradeBtn = this.add.text(panelX + 20, row1Y, '★ UP', {
+      fontSize: '11px', color: upTextColor, backgroundColor: upColor,
+      padding: { x: 6, y: 4 }, fontStyle: 'bold',
+    }).setOrigin(0, 0.5);
+    if (canUpgrade) {
+      upgradeBtn.setInteractive({ useHandCursor: true })
         .on('pointerdown', () => {
           socket.send({ type: 'UPGRADE_TOWER', towerId });
           this.hideTowerActionMenu();
         });
-      this.towerActionMenu.add(upgradeBtn);
-      btnY += btnSpacing;
     }
+    this.towerActionMenu.add(upgradeBtn);
     
-    // Sell button (only during shopping)
-    if (this.gameState.phase === 'shopping') {
-      const copies = tower.stars >= 3 ? 9 : tower.stars >= 2 ? 3 : 1;
-      const sellPrice = Math.floor(def.cost * copies * 0.7);
-      const sellBtn = this.add.text(x + 50, btnY, `💰 SELL (${sellPrice}g)`, {
-        fontSize: '11px', color: '#e0e8ff', backgroundColor: '#ff4444aa',
-        padding: { x: 6, y: 3 },
-      }).setOrigin(0.5).setInteractive({ useHandCursor: true })
+    // Element/Combo buttons (only for arrow/cannon)
+    if (canApplyElement && uniqueElements.length > 0) {
+      let btnIdx = 0;
+      const elemStartY = row1Y + 22;
+      const btnSize = 24;
+      const btnGap = 4;
+      const perRow = 4;
+      const startX = panelX - panelW / 2 + 12;
+      
+      // Neutral button (remove element)
+      const isNeutral = !tower.element && !tower.combo;
+      const neutralBtn = this.add.rectangle(
+        startX + btnIdx % perRow * (btnSize + btnGap) + btnSize / 2,
+        elemStartY + Math.floor(btnIdx / perRow) * (btnSize + btnGap) + btnSize / 2,
+        btnSize, btnSize, 0x444466, isNeutral ? 1 : 0.5
+      ).setStrokeStyle(isNeutral ? 2 : 1, isNeutral ? 0xffffff : 0x666666)
+        .setInteractive({ useHandCursor: true })
         .on('pointerdown', () => {
-          socket.send({ type: 'SELL_TOWER', instanceId: towerId });
-          this.hideTowerActionMenu();
+          socket.send({ type: 'APPLY_ELEMENT', towerId });
         });
-      this.towerActionMenu.add(sellBtn);
-      btnY += btnSpacing;
+      this.towerActionMenu.add(neutralBtn);
+      const neutralLabel = this.add.text(
+        neutralBtn.x, neutralBtn.y, '✕', { fontSize: '12px', color: '#aaa' }
+      ).setOrigin(0.5);
+      this.towerActionMenu.add(neutralLabel);
+      btnIdx++;
+      
+      // Element buttons
+      for (const elem of uniqueElements) {
+        const isActive = tower.element === elem && !tower.combo;
+        const col = btnIdx % perRow;
+        const row = Math.floor(btnIdx / perRow);
+        const bx = startX + col * (btnSize + btnGap) + btnSize / 2;
+        const by = elemStartY + row * (btnSize + btnGap) + btnSize / 2;
+        const colorHex = ELEMENT_COLOR_HEX[elem] || 0xffffff;
+        
+        const btn = this.add.rectangle(bx, by, btnSize, btnSize, colorHex, isActive ? 1 : 0.6)
+          .setStrokeStyle(isActive ? 2 : 1, isActive ? 0xffffff : colorHex)
+          .setInteractive({ useHandCursor: true })
+          .on('pointerdown', () => {
+            socket.send({ type: 'APPLY_ELEMENT', towerId, element: elem });
+          });
+        this.towerActionMenu.add(btn);
+        
+        const emoji = ELEMENT_EMOJI[elem] || '?';
+        const label = this.add.text(bx, by, emoji, { fontSize: '11px' }).setOrigin(0.5);
+        this.towerActionMenu.add(label);
+        btnIdx++;
+      }
+      
+      // Combo buttons
+      for (const combo of unlockedCombos) {
+        const isActive = tower.combo === combo.id;
+        const col = btnIdx % perRow;
+        const row = Math.floor(btnIdx / perRow);
+        const bx = startX + col * (btnSize + btnGap) + btnSize / 2;
+        const by = elemStartY + row * (btnSize + btnGap) + btnSize / 2;
+        
+        const btn = this.add.rectangle(bx, by, btnSize, btnSize, combo.colorHex, isActive ? 1 : 0.6)
+          .setStrokeStyle(isActive ? 2 : 1, isActive ? 0xffffff : combo.colorHex)
+          .setInteractive({ useHandCursor: true })
+          .on('pointerdown', () => {
+            socket.send({ type: 'APPLY_ELEMENT', towerId, comboId: combo.id });
+          });
+        this.towerActionMenu.add(btn);
+        
+        const label = this.add.text(bx, by, combo.name.slice(0, 2), {
+          fontSize: '8px', color: '#fff', fontStyle: 'bold',
+        }).setOrigin(0.5);
+        this.towerActionMenu.add(label);
+        btnIdx++;
+      }
     }
-    
-    // Info button
-    const infoBtn = this.add.text(x + 50, btnY, 'ℹ INFO', {
-      fontSize: '11px', color: '#e0e8ff', backgroundColor: '#7b2fbe',
-      padding: { x: 6, y: 3 },
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => {
-        // Show detailed info - for now just close menu
-        this.hideTowerActionMenu();
-      });
-    this.towerActionMenu.add(infoBtn);
   }
 
   private hideTowerActionMenu() {

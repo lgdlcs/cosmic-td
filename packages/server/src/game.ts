@@ -33,10 +33,13 @@ import {
   AUGMENT_POOL,
   randomElement,
   getActiveCombo,
+  findCombo,
+  COMBO_MAP,
   PVP_UNIT_DEFS,
   MOB_BASE_HP,
   MOB_HP_SCALE,
 } from '@ect/shared';
+import type { Element } from '@ect/shared';
 import type { TowerTier } from '@ect/shared';
 import { ShopManager } from './shop.js';
 import { CombatManager } from './combat.js';
@@ -55,6 +58,7 @@ export class Game {
   phaseTimer: ReturnType<typeof setInterval> | null = null;
   tickCount = 0;
   roundLeaks: Map<string, number> = new Map();
+  firstKillClaimed: boolean = false;
   speed: number = 1;
   config: GameConfig;
   /** Track which players have picked augments this round */
@@ -133,16 +137,12 @@ export class Game {
         const cost = TOWER_COSTS[def.id] || def.cost;
         if (player.gold < cost) return;
 
-        // Assign element if player has one and tower is arrow/cannon
-        const activeElement = player.elements.length > 0 ? player.elements[player.elements.length - 1] : undefined;
-        const getsElement = (def.towerType === 'arrow' || def.towerType === 'cannon') && activeElement;
-        
+        // Towers are placed neutral — player applies elements manually
         const tower: TowerInstance = {
           instanceId: nanoid(8),
           defId: itemId,
           position: msg.position,
           stars: 1,
-          element: getsElement ? activeElement : undefined,
         };
         player.towers.push(tower);
         player.gold -= cost;
@@ -171,7 +171,6 @@ export class Game {
         break;
       }
       case 'UPGRADE_TOWER': {
-        if (this.state.phase !== 'shopping') return;
         if (this.shop.upgradeTower(player, msg.towerId)) {
           const tower = player.towers.find(t => t.instanceId === msg.towerId);
           if (tower) {
@@ -193,22 +192,14 @@ export class Game {
         player.augments.push(msg.augmentId);
         this.augmentPicked.add(playerId);
         
-        // Track element picks and update tower elements
+        // Track element picks — unlocks the element for the player (no auto-apply to towers)
         const pickedAug = AUGMENT_POOL.find(a => a.id === msg.augmentId);
         if (pickedAug && pickedAug.effect.type === 'element') {
           player.elements.push(pickedAug.effect.element);
-          const activeElement = pickedAug.effect.element;
-          // Update all arrow and cannon towers with this element
-          for (const tower of player.towers) {
-            const def = TOWER_MAP[tower.defId];
-            if (def && (def.towerType === 'arrow' || def.towerType === 'cannon')) {
-              tower.element = activeElement;
-            }
-          }
           
-          // Check for combo unlock
+          // Check for combo unlock (notify client for display)
           const combo = getActiveCombo(player.elements);
-          if (combo) {
+          if (combo && player.activeCombo !== combo.id) {
             player.activeCombo = combo.id;
             this.broadcast({ type: 'COMBO_UNLOCKED', playerId, comboId: combo.id, comboName: combo.name, comboColor: combo.color });
           }
@@ -238,9 +229,39 @@ export class Game {
         this.broadcast({ type: 'SPEED_CHANGE', speed: s });
         break;
       }
+      case 'APPLY_ELEMENT': {
+        // Apply an unlocked element or combo to a specific tower
+        const tower = player.towers.find(t => t.instanceId === msg.towerId);
+        if (!tower) return;
+        const towerDef = TOWER_MAP[tower.defId];
+        if (!towerDef || (towerDef.towerType !== 'arrow' && towerDef.towerType !== 'cannon')) return;
+
+        if (msg.comboId) {
+          // Applying a combo
+          const combo = COMBO_MAP[msg.comboId];
+          if (!combo) return;
+          // Player must have both elements unlocked
+          if (!player.elements.includes(combo.elements[0]) || !player.elements.includes(combo.elements[1])) return;
+          tower.element = combo.elements[0]; // primary element for damage calc
+          tower.combo = combo.id;
+          this.broadcast({ type: 'ELEMENT_APPLIED', playerId, towerId: msg.towerId, comboId: combo.id });
+        } else if (msg.element) {
+          // Applying a single element
+          if (!player.elements.includes(msg.element)) return;
+          tower.element = msg.element;
+          tower.combo = undefined;
+          this.broadcast({ type: 'ELEMENT_APPLIED', playerId, towerId: msg.towerId, element: msg.element });
+        } else {
+          // Remove element (set to neutral)
+          tower.element = undefined;
+          tower.combo = undefined;
+          this.broadcast({ type: 'ELEMENT_APPLIED', playerId, towerId: msg.towerId });
+        }
+        this.broadcastStateUpdate();
+        break;
+      }
       case 'QUEUE_PVP_UNIT': {
         // Feature 4: PvP unit queueing
-        if (this.state.phase !== 'shopping') return;
         
         const unitDef = PVP_UNIT_DEFS[msg.unitType as keyof typeof PVP_UNIT_DEFS];
         if (!unitDef) return;
@@ -451,18 +472,12 @@ export class Game {
           if (choices.length > 0) {
             const randomPick = choices[Math.floor(Math.random() * choices.length)];
             p.augments.push(randomPick);
-            // Track element for auto-picks too
+            // Track element for auto-picks too (no auto-apply to towers)
             const aug = AUGMENT_POOL.find(a => a.id === randomPick);
             if (aug && aug.effect.type === 'element') {
               p.elements.push(aug.effect.element);
-              for (const tower of p.towers) {
-                const def = TOWER_MAP[tower.defId];
-                if (def && (def.towerType === 'arrow' || def.towerType === 'cannon')) {
-                  tower.element = aug.effect.element;
-                }
-              }
               const combo = getActiveCombo(p.elements);
-              if (combo) {
+              if (combo && p.activeCombo !== combo.id) {
                 p.activeCombo = combo.id;
                 this.broadcast({ type: 'COMBO_UNLOCKED', playerId: p.id, comboId: combo.id, comboName: combo.name, comboColor: combo.color });
               }
@@ -612,6 +627,7 @@ export class Game {
     this.broadcastStateUpdate();
 
     this.roundLeaks.clear();
+    this.firstKillClaimed = false;
     this.state.players.filter((p) => p.alive).forEach((p) => {
       this.roundLeaks.set(p.id, 0);
     });
@@ -633,9 +649,14 @@ export class Game {
     this.state.players.filter((p) => p.alive).forEach((p) => {
       const result = this.combat.tick(p, this.state.mobs[p.id], TICK_MS);
 
+      let gotFirstKill = false;
       result.killed.forEach(() => {
-        const goldReward = this.economy.mobKillReward(this.state.round);
-        p.gold += goldReward;
+        // First kill of the round across ALL players = +2g
+        if (!this.firstKillClaimed) {
+          this.firstKillClaimed = true;
+          gotFirstKill = true;
+          p.gold += 2;
+        }
       });
 
       result.leaked.forEach((mob) => {
@@ -667,11 +688,11 @@ export class Game {
             element: a.element,
             splash: a.splash,
           })),
-          kills: result.killed.map((m) => ({
+          kills: result.killed.map((m, i) => ({
             mobId: m.instanceId,
             x: m.x,
             y: m.y,
-            gold: this.economy.mobKillReward(this.state.round),
+            gold: (i === 0 && gotFirstKill) ? 2 : 0,
           })),
           leaks: result.leaked.map((m) => m.instanceId),
         });

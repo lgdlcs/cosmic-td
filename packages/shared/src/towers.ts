@@ -28,14 +28,13 @@ export const TOWER_DEFS: TowerDef[] = [
   },
   {
     id: 'income',
-    name: 'Mining Probe',
+    name: 'Arcane Tower',
     towerType: 'income',
-    cost: 7,
-    damage: 0,
-    attackSpeed: 0,
-    range: 0,
-    description: 'Extracts +2 credits per round',
-    incomePerRound: 2,
+    cost: 5,
+    damage: 15,
+    attackSpeed: 0.8,
+    range: 3,
+    description: 'Needs an element to fire. Combo = 2x damage',
   },
   {
     id: 'pvp',
@@ -114,6 +113,16 @@ export function getTowerStats(
   if (element === 'asteroid' && def.towerType === 'cannon' && splashRadius) {
     const asteroidBonus = (elementTier || 1) >= 2 ? 1.5 : 1.3;
     splashRadius *= asteroidBonus;
+  }
+
+  // Arcane Tower: no element = no damage, combo = 2x
+  if (def.towerType === 'income') {
+    if (!element) {
+      damage = 0;
+      attackSpeed = 0;
+    } else if ((elementTier || 0) >= 2) {
+      damage *= 2;
+    }
   }
 
   const starLabel = stars >= 3 ? ' ★★★' : stars >= 2 ? ' ★★' : '';

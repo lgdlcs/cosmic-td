@@ -41,6 +41,7 @@ export interface TowerInstance {
   position: GridPos;
   stars: TowerTier;     // 1 = base, 2 = ★★ (upgraded), 3 = ★★★
   element?: Element;    // assigned when player picks an element augment
+  combo?: string;       // active combo ID applied to this tower
   canUpgrade?: boolean; // server-computed: can this tower be upgraded?
 }
 
@@ -139,7 +140,8 @@ export type ClientMsg =
   | { type: 'DEV_START_COMBAT' }
   | { type: 'SET_SPEED'; speed: number }
   | { type: 'SET_COLOR'; color: PlayerColor } // Feature 3: Lobby color picker
-  | { type: 'QUEUE_PVP_UNIT'; unitType: string; targetPlayerId: string }; // Feature 4: PvP queue
+  | { type: 'QUEUE_PVP_UNIT'; unitType: string; targetPlayerId: string } // Feature 4: PvP queue
+  | { type: 'APPLY_ELEMENT'; towerId: string; element?: Element; comboId?: string };
 
 // Server → Client
 export type ServerMsg =
@@ -163,7 +165,8 @@ export type ServerMsg =
   | { type: 'GAME_OVER'; winnerId: string }
   | { type: 'ERROR'; message: string }
   | { type: 'NEXT_WAVE_INFO'; mobType: string; element?: Element; count: number; hp: number } // Feature 2: Next wave info
-  | { type: 'PVP_QUEUE_UPDATE'; queue: PvPQueueEntry[] }; // Feature 4: PvP queue update
+  | { type: 'PVP_QUEUE_UPDATE'; queue: PvPQueueEntry[] } // Feature 4: PvP queue update
+  | { type: 'ELEMENT_APPLIED'; playerId: string; towerId: string; element?: Element; comboId?: string };
 
 export interface CombatAttack {
   towerX: number;
