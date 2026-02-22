@@ -86,8 +86,16 @@ export const KILL_REWARD_TIERS = [
   { maxRound: 30, gold: 2 },
 ];
 
-// ── PvP Units (Feature 4) ───────────────────────────────
+// ── PvP Points System (Feature 4) ───────────────────────
 
+export const PVP_COSTS = { basic: 3, flying: 8, boss: 10 } as const;
+export const PVP_HP_MULT = 1.5;       // boost over round HP for basic PvP units
+export const PVP_BOSS_HP_MULT = 5;    // boss PvP unit HP multiplier
+export const PVP_FLYING_HP_MULT = 0.7; // flying PvP unit HP multiplier (lower HP)
+export const PVP_FLYING_SPEED = 3;    // flying unit straight-line speed
+export const PVP_COLOR = 0x9B5DE5;    // purple color for PvP mobs
+
+/** @deprecated kept for backward compat — use PVP_COSTS instead */
 export const PVP_UNIT_DEFS = {
   pvp_grunt: { id: 'pvp_grunt', cost: 5, hp_mult: 1.0 },
   pvp_runner: { id: 'pvp_runner', cost: 8, hp_mult: 0.6, speed_mult: 1.8 },

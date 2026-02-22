@@ -44,7 +44,7 @@ export const TOWER_DEFS: TowerDef[] = [
     damage: 0,
     attackSpeed: 0,
     range: 0,
-    description: 'Warps an alien mob to opponent each round',
+    description: 'Generates PvP points per round. Use points to send units to opponents.',
     mobPower: 1.0,
   },
 ];

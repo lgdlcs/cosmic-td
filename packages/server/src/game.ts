@@ -38,6 +38,11 @@ import {
   PVP_UNIT_DEFS,
   MOB_BASE_HP,
   MOB_HP_SCALE,
+  PVP_COSTS,
+  PVP_HP_MULT,
+  PVP_BOSS_HP_MULT,
+  PVP_FLYING_HP_MULT,
+  PVP_FLYING_SPEED,
 } from '@ect/shared';
 import type { Element } from '@ect/shared';
 import type { TowerTier } from '@ect/shared';
@@ -92,6 +97,7 @@ export class Game {
       elements: [],
       streak: 0,
       alive: true,
+      pvpPoints: 0,
     }));
 
     this.state = {
@@ -268,20 +274,20 @@ export class Game {
         break;
       }
       case 'QUEUE_PVP_UNIT': {
-        // Feature 4: PvP unit queueing
-        
-        const unitDef = PVP_UNIT_DEFS[msg.unitType as keyof typeof PVP_UNIT_DEFS];
-        if (!unitDef) return;
+        // Feature 4: PvP unit queueing (points-based)
+        const unitType = msg.unitType as keyof typeof PVP_COSTS;
+        const cost = PVP_COSTS[unitType];
+        if (!cost) return;
         
         // Validate target player exists and is alive
         const targetPlayer = this.state.players.find(p => p.id === msg.targetPlayerId && p.alive);
         if (!targetPlayer || targetPlayer.id === playerId) return;
         
-        // Check if player has enough gold
-        if (player.gold < unitDef.cost) return;
+        // Check if player has enough pvpPoints
+        if (player.pvpPoints < cost) return;
         
-        // Deduct cost and add to queue
-        player.gold -= unitDef.cost;
+        // Deduct points and add to queue
+        player.pvpPoints -= cost;
         
         if (!this.pvpQueues.has(playerId)) {
           this.pvpQueues.set(playerId, []);
@@ -289,9 +295,9 @@ export class Game {
         const queue = this.pvpQueues.get(playerId)!;
         queue.push({ unitType: msg.unitType, targetPlayerId: msg.targetPlayerId });
         
-        // Send queue update to sender
+        // Send queue update and state update to sender
         this.sendTo(playerId, { type: 'PVP_QUEUE_UPDATE', queue: [...queue] });
-        this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
+        this.broadcastStateUpdate();
         break;
       }
     }
@@ -548,24 +554,43 @@ export class Game {
       this.state.mobs[p.id] = this.combat.spawnWave(this.state.round, p);
     });
 
-    // Feature 4: Spawn PvP units from queue
+    // Feature 4: Spawn PvP units from queue (points-based)
     this.state.players.filter(p => p.alive).forEach(p => {
       const queue = this.pvpQueues.get(p.id) || [];
-      let delay = 1.5; // Start spawning 1.5 seconds after regular wave
+      let delay = 1.5;
+      
+      // Determine current round's mob type for PvP basic units
+      const roundBaseHp = Math.floor(MOB_BASE_HP * Math.pow(MOB_HP_SCALE, this.state.round - 1));
+      const isBossRound = [5, 10, 15, 20, 25, 30].includes(this.state.round);
+      const isSwarmRound = this.state.round % 3 === 0;
+      const isRunnerRound = !isSwarmRound && this.state.round % 2 === 0;
+      const roundMobType = isBossRound ? 'boss' : isSwarmRound ? 'swarm' : isRunnerRound ? 'runner' : 'tank';
       
       for (const entry of queue) {
-        const unitDef = PVP_UNIT_DEFS[entry.unitType as keyof typeof PVP_UNIT_DEFS];
-        if (!unitDef) continue;
-        
         const targetPlayer = this.state.players.find(tp => tp.id === entry.targetPlayerId && tp.alive);
         if (!targetPlayer) continue;
         
-        const hp = Math.floor(MOB_BASE_HP * Math.pow(MOB_HP_SCALE, this.state.round - 1) * unitDef.hp_mult);
         const mapEntry = this.map.entry;
+        let hp: number;
+        let defId: string;
+        let isFlying = false;
+        
+        if (entry.unitType === 'boss') {
+          hp = Math.floor(roundBaseHp * PVP_BOSS_HP_MULT);
+          defId = 'boss';
+        } else if (entry.unitType === 'flying') {
+          hp = Math.floor(roundBaseHp * PVP_FLYING_HP_MULT);
+          defId = 'flying';
+          isFlying = true;
+        } else {
+          // basic — matches current round mob type with 1.5x HP boost
+          hp = Math.floor(roundBaseHp * PVP_HP_MULT);
+          defId = roundMobType;
+        }
         
         const newMob: MobInstance = {
           instanceId: nanoid(8),
-          defId: entry.unitType.replace('pvp_', ''), // pvp_grunt -> grunt, etc.
+          defId,
           hp,
           maxHp: hp,
           x: mapEntry.col,
@@ -575,6 +600,8 @@ export class Game {
           visible: true,
           element: this.state.round >= 3 ? randomElement() : undefined,
           armor: 0,
+          isPvp: true,
+          isFlying,
         };
         
         if (!this.state.mobs[targetPlayer.id]) {
@@ -582,7 +609,7 @@ export class Game {
         }
         this.state.mobs[targetPlayer.id].push(newMob);
         
-        delay += 0.5; // Stagger PvP units
+        delay += 0.5;
       }
       
       // Clear queue after spawning
@@ -590,46 +617,7 @@ export class Game {
       this.sendTo(p.id, { type: 'PVP_QUEUE_UPDATE', queue: [] });
     });
 
-    // PvP monster pits: send mobs to opponents
-    this.state.players.filter(p => p.alive).forEach(p => {
-      const pvpTowers = p.towers.filter(t => t.defId === 'pvp');
-      if (pvpTowers.length === 0) return;
-
-      const opponents = this.state.players.filter(op => op.alive && op.id !== p.id);
-      if (opponents.length === 0) return;
-
-      for (const pvpTower of pvpTowers) {
-        const def = TOWER_MAP[pvpTower.defId];
-        if (!def) continue;
-        
-        const mobPower = def.mobPower || 1.0;
-        const starMult = pvpTower.stars >= 3 ? 3 : pvpTower.stars >= 2 ? 2 : 1;
-        const pvpMultiplier = p.augments.includes('PVP_BOOST') ? 1.25 : 1;
-        const doubleCount = p.augments.includes('DOUBLE_SEND') ? 2 : 1;
-        
-        const hp = Math.floor(MOB_BASE_HP * Math.pow(1.10, this.state.round - 1) * mobPower * starMult * pvpMultiplier);
-        const target = opponents[Math.floor(Math.random() * opponents.length)];
-        
-        for (let i = 0; i < doubleCount; i++) {
-          const entry = this.map.entry;
-          const newMob: MobInstance = {
-            instanceId: nanoid(8),
-            defId: 'tank', // PvP mobs are tanky
-            hp,
-            maxHp: hp,
-            x: entry.col,
-            y: entry.row - 0.3 * i,
-            pathIndex: 0,
-            effects: [],
-            visible: true,
-            element: this.state.round >= 3 ? randomElement() : undefined,
-            armor: 0,
-          };
-          if (!this.state.mobs[target.id]) this.state.mobs[target.id] = [];
-          this.state.mobs[target.id].push(newMob);
-        }
-      }
-    });
+    // Warp Gates no longer auto-spawn mobs — they generate PvP points in endRound
 
     this.broadcastStateUpdate();
 
@@ -710,7 +698,7 @@ export class Game {
       }
     });
 
-    if (this.tickCount % MOB_SYNC_INTERVAL === 0)
+    if (this.tickCount % MOB_SYNC_INTERVAL === 0) {
       this.broadcast({ type: 'MOB_SYNC', mobs: this.state.mobs });
     }
 
@@ -748,6 +736,16 @@ export class Game {
     this.state.players.filter((p) => p.alive).forEach((p) => {
       const leakCount = this.roundLeaks.get(p.id) || 0;
       this.economy.endOfRoundIncome(p, leakCount === 0);
+      
+      // Generate PvP points from Warp Gates (1★=1pt, 2★=2pt, 3★=3pt per gate)
+      const pvpTowers = p.towers.filter(t => t.defId === 'pvp');
+      let pvpPointsGain = 0;
+      for (const tower of pvpTowers) {
+        pvpPointsGain += tower.stars;
+      }
+      if (pvpPointsGain > 0) {
+        p.pvpPoints += pvpPointsGain;
+      }
     });
 
     this.broadcastStateUpdate();

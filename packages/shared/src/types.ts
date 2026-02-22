@@ -75,6 +75,8 @@ export interface MobInstance {
   visible: boolean;
   element?: Element;    // assigned from round 3+
   armor?: number;       // base 0, can be reduced by dark cannon
+  isPvp?: boolean;      // PvP mob sent by opponent
+  isFlying?: boolean;   // flying PvP mob — straight line movement
 }
 
 // ── Player ──────────────────────────────────────────────
@@ -92,6 +94,7 @@ export interface PlayerState {
   activeCombo?: string;       // active combo ID (e.g., 'PLASMA')
   streak: number;
   alive: boolean;
+  pvpPoints: number;
 }
 
 // ── Map ─────────────────────────────────────────────────
@@ -140,7 +143,7 @@ export type ClientMsg =
   | { type: 'DEV_START_COMBAT' }
   | { type: 'SET_SPEED'; speed: number }
   | { type: 'SET_COLOR'; color: PlayerColor } // Feature 3: Lobby color picker
-  | { type: 'QUEUE_PVP_UNIT'; unitType: string; targetPlayerId: string } // Feature 4: PvP queue
+  | { type: 'QUEUE_PVP_UNIT'; unitType: 'basic' | 'flying' | 'boss'; targetPlayerId: string } // Feature 4: PvP queue
   | { type: 'APPLY_ELEMENT'; towerId: string; element?: Element; comboId?: string };
 
 // Server → Client

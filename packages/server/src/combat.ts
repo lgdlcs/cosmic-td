@@ -27,6 +27,7 @@ import {
   getEffectiveness,
   randomElement,
   COMBO_MAP,
+  PVP_FLYING_SPEED,
 } from '@ect/shared';
 import type { ComboEffectType } from '@ect/shared';
 
@@ -582,40 +583,69 @@ export class CombatManager {
         continue;
       }
 
-      let baseSpeed = 1.5;
-      if (mob.defId === 'runner') baseSpeed *= RUNNER_SPEED_MULT;
-      else if (mob.defId === 'tank') baseSpeed *= TANK_SPEED_MULT;
-      else if (mob.defId === 'boss') baseSpeed *= 0.7;
+      // Flying mobs move in a straight line from entry to exit
+      if (mob.isFlying) {
+        let speed = PVP_FLYING_SPEED;
+        let frozen = false;
+        let stunned = false;
+        for (const effect of mob.effects) {
+          if (effect.type === 'slow') speed *= (1 - effect.value);
+          if (effect.type === 'freeze') frozen = true;
+          if (effect.type === 'stun') stunned = true;
+        }
+        if (frozen || stunned) speed = 0;
+        else speed = Math.max(speed, 0.2);
 
-      let speed = baseSpeed;
-      let frozen = false;
-      let stunned = false;
-      for (const effect of mob.effects) {
-        if (effect.type === 'slow') speed *= (1 - effect.value);
-        if (effect.type === 'freeze') frozen = true;
-        if (effect.type === 'stun') stunned = true;
-      }
-      if (frozen || stunned) speed = 0;
-      else speed = Math.max(speed, 0.2);
+        const exitX = this.map.exit.col;
+        const exitY = this.map.exit.row;
+        const dx = exitX - mob.x;
+        const dy = exitY - mob.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
 
-      const nextIdx = mob.pathIndex + 1;
-      if (nextIdx >= this.map.path.length) {
-        leaked.push(mob);
-        continue;
-      }
-
-      const target = this.map.path[nextIdx];
-      const dx = target.col - mob.x;
-      const dy = target.row - mob.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-
-      if (dist < speed * dt) {
-        mob.x = target.col;
-        mob.y = target.row;
-        mob.pathIndex = nextIdx;
+        if (dist < speed * dt) {
+          leaked.push(mob);
+          continue;
+        } else {
+          mob.x += (dx / dist) * speed * dt;
+          mob.y += (dy / dist) * speed * dt;
+        }
       } else {
-        mob.x += (dx / dist) * speed * dt;
-        mob.y += (dy / dist) * speed * dt;
+        // Normal path-following movement
+        let baseSpeed = 1.5;
+        if (mob.defId === 'runner') baseSpeed *= RUNNER_SPEED_MULT;
+        else if (mob.defId === 'tank') baseSpeed *= TANK_SPEED_MULT;
+        else if (mob.defId === 'boss') baseSpeed *= 0.7;
+
+        let speed = baseSpeed;
+        let frozen = false;
+        let stunned = false;
+        for (const effect of mob.effects) {
+          if (effect.type === 'slow') speed *= (1 - effect.value);
+          if (effect.type === 'freeze') frozen = true;
+          if (effect.type === 'stun') stunned = true;
+        }
+        if (frozen || stunned) speed = 0;
+        else speed = Math.max(speed, 0.2);
+
+        const nextIdx = mob.pathIndex + 1;
+        if (nextIdx >= this.map.path.length) {
+          leaked.push(mob);
+          continue;
+        }
+
+        const target = this.map.path[nextIdx];
+        const dx = target.col - mob.x;
+        const dy = target.row - mob.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < speed * dt) {
+          mob.x = target.col;
+          mob.y = target.row;
+          mob.pathIndex = nextIdx;
+        } else {
+          mob.x += (dx / dist) * speed * dt;
+          mob.y += (dy / dist) * speed * dt;
+        }
       }
 
       // Tick effects

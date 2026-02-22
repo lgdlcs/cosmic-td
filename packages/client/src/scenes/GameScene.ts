@@ -179,7 +179,6 @@ export class GameScene extends Phaser.Scene {
   private towerActionMenu: Phaser.GameObjects.Container | null = null;
 
   // Feature 4: PvP queue
-  private pvpPanel: Phaser.GameObjects.Container | null = null;
   private pvpQueue: PvPQueueEntry[] = [];
   private pvpTargetIndex: number = 0;
 
@@ -195,18 +194,27 @@ export class GameScene extends Phaser.Scene {
   private hudLeft: HTMLSpanElement | null = null;
   private hudCenter: HTMLSpanElement | null = null;
   private hudRight: HTMLSpanElement | null = null;
-  private uiShopSlots: Phaser.GameObjects.Text[] = [];
-  private uiAugmentList!: Phaser.GameObjects.Text;
-  private uiOpponents: Phaser.GameObjects.Text[] = [];
-  private uiMobCount!: Phaser.GameObjects.Text;
   private uiTowerHoverInfo!: Phaser.GameObjects.Text;
+
+  // DOM UI overlay
+  private gameUiEl: HTMLDivElement | null = null;
+  private domShopSlots: HTMLDivElement[] = [];
+  private domRerollBtn: HTMLDivElement | null = null;
+  private domTechTreeBtn: HTMLDivElement | null = null;
+  private domSendWaveBtn: HTMLDivElement | null = null;
+  private domInstruction: HTMLDivElement | null = null;
+  private domSpeedBtns: HTMLDivElement[] = [];
+  private domAugmentList: HTMLDivElement | null = null;
+  private domOpponents: HTMLDivElement[] = [];
+  private domPvPPanel: HTMLDivElement | null = null;
+  private domMobCount: HTMLSpanElement | null = null;
+  private domShopLabel: HTMLDivElement | null = null;
 
   // Timer
   private localTimer = 0;
   private timerEvent: Phaser.Time.TimerEvent | null = null;
 
   // Speed
-  private speedButtons: Phaser.GameObjects.Text[] = [];
   private currentSpeed: number = 1;
 
   // Network handler
@@ -313,9 +321,9 @@ export class GameScene extends Phaser.Scene {
     if (this.timerEvent) this.timerEvent.destroy();
     if (this.augmentOverlay) this.augmentOverlay.destroy();
     if (this.towerActionMenu) this.towerActionMenu.destroy();
-    if (this.pvpPanel) this.pvpPanel.destroy();
     if (this.techTreeOverlay) this.techTreeOverlay.destroy();
     this.destroyHUD();
+    this.destroyDOMUI();
   }
 
   update(_time: number, delta: number) {
@@ -330,11 +338,13 @@ export class GameScene extends Phaser.Scene {
     this.drawFX();
     this.drawOpponentMiniViews();
 
-    if (this.gameState.phase === 'combat') {
-      const mobs = this.gameState.mobs[this.myId] || [];
-      this.uiMobCount.setText(`Mobs: ${mobs.length} remaining`);
-    } else {
-      this.uiMobCount.setText('');
+    if (this.domMobCount) {
+      if (this.gameState.phase === 'combat') {
+        const mobs = this.gameState.mobs[this.myId] || [];
+        this.domMobCount.textContent = `Mobs: ${mobs.length} remaining`;
+      } else {
+        this.domMobCount.textContent = '';
+      }
     }
   }
 
@@ -1163,131 +1173,23 @@ export class GameScene extends Phaser.Scene {
 
   private updateSpeedButtons() {
     const speeds = [1, 2, 3, 5, 10];
-    this.speedButtons.forEach((btn, i) => {
+    this.domSpeedBtns.forEach((btn, i) => {
       const s = speeds[i];
       const active = s === this.currentSpeed;
-      btn.setStyle({
-        color: active ? '#0a0a14' : '#7a8aaa',
-        backgroundColor: active ? '#00d4ff' : '#12122a',
-      });
+      btn.style.color = active ? '#0a0a14' : '#7a8aaa';
+      btn.style.background = active ? '#00d4ff' : '#12122a';
     });
   }
 
   // ── UI ────────────────────────────────────────────────
 
   private createUI() {
-    const shopY = GRID_Y + GRID_PX + 12;
-
     // Top bar — DOM overlay with flexbox
     this.createHUD();
+    // All game UI as DOM overlay
+    this.createDOMUI();
 
-    // Mute button
-    const muteBtn = this.add.text(GRID_X + GRID_PX, 8, sfx.muted ? '🔇' : '🔊', {
-      fontFamily: FONT, fontSize: '20px',
-    }).setOrigin(1, 0).setDepth(5).setInteractive({ useHandCursor: true });
-    muteBtn.on('pointerdown', () => {
-      const muted = sfx.toggle();
-      muteBtn.setText(muted ? '🔇' : '🔊');
-    });
-
-    // Mob count
-    this.uiMobCount = this.add.text(GRID_X + GRID_PX, 30, '', {
-      fontFamily: FONT, fontSize: '12px', color: '#888',
-    }).setOrigin(1, 0).setDepth(5);
-
-    // Opponents (left sidebar)
-    for (let i = 0; i < 3; i++) {
-      this.uiOpponents.push(
-        this.add.text(10, GRID_Y + i * 70, '', {
-          fontFamily: FONT, fontSize: '13px', color: '#e0e8ff',
-          backgroundColor: '#0d1117cc',
-          padding: { x: 8, y: 6 },
-          fixedWidth: 185,
-          wordWrap: { width: 175 },
-        }).setDepth(5)
-      );
-    }
-
-    // Augment list (right sidebar)
-    this.uiAugmentList = this.add.text(GRID_X + GRID_PX + 10, GRID_Y, '', {
-      fontFamily: FONT, fontSize: '12px', color: '#e0e8ff',
-      backgroundColor: '#0d1117cc',
-      padding: { x: 8, y: 6 },
-      wordWrap: { width: 170 },
-      lineSpacing: 4,
-    }).setDepth(5);
-
-    // Shop with keybind hints (Feature 1)
-    this.add.text(GRID_X, shopY - 2, 'SPACE STATION — Buy 3 of same type → ★ upgrade', {
-      fontFamily: FONT, fontSize: '11px', color: '#666', fontStyle: 'bold',
-    }).setDepth(5);
-
-    for (let i = 0; i < 5; i++) {
-      const x = GRID_X + i * 104;
-      
-      // Feature 1: Add keybind hint above slot
-      this.add.text(x + 49, shopY + 3, `[${i + 1}]`, {
-        fontFamily: FONT, fontSize: '10px', color: '#666', fontStyle: 'bold',
-      }).setOrigin(0.5, 0).setDepth(5);
-      
-      const txt = this.add.text(x, shopY + 14, '', {
-        fontFamily: FONT, fontSize: '12px', color: '#e0e8ff',
-        backgroundColor: '#0d1117cc',
-        padding: { x: 6, y: 5 },
-        fixedWidth: 98,
-        wordWrap: { width: 90 },
-      })
-        .setDepth(5)
-        .setInteractive({ useHandCursor: true })
-        .on('pointerdown', () => this.selectShopSlot(i));
-      this.uiShopSlots.push(txt);
-    }
-
-    // Buttons with keybind hints (Feature 1)
-    const btnX = GRID_X + 5 * 104 + 8;
-    this.add.text(btnX, shopY + 14, '🔄 [D] Reroll 2g', {
-      fontFamily: FONT, fontSize: '13px', color: '#0a0a14', backgroundColor: '#ffc107',
-      padding: { x: 8, y: 8 },
-    }).setDepth(5).setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => socket.send({ type: 'REROLL' }));
-
-    this.add.text(btnX, shopY + 52, 'TECH TREE', {
-      fontFamily: FONT, fontSize: '13px', color: '#e0e8ff', backgroundColor: '#7b2fbe',
-      padding: { x: 8, y: 8 },
-    }).setDepth(5).setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => this.showTechTree());
-
-    this.add.text(btnX, shopY + 86, '▶ [Space] Send Wave', {
-      fontFamily: FONT, fontSize: '13px', color: '#e0e8ff', backgroundColor: '#ff4444',
-      padding: { x: 8, y: 8 },
-    }).setDepth(5).setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => socket.send({ type: 'DEV_START_COMBAT' }));
-
-    // Speed buttons
-    const speeds = [1, 2, 3, 5, 10];
-    this.speedButtons = [];
-    const speedY = GRID_Y - 28;
-    const speedStartX = GRID_X + GRID_PX - speeds.length * 34;
-    speeds.forEach((s, i) => {
-      const btn = this.add.text(speedStartX + i * 34, speedY, `×${s}`, {
-        fontFamily: FONT, fontSize: '12px',
-        color: s === 1 ? '#0a0a14' : '#7a8aaa',
-        backgroundColor: s === 1 ? '#00d4ff' : '#12122a',
-        padding: { x: 5, y: 4 },
-      }).setDepth(5).setInteractive({ useHandCursor: true })
-        .on('pointerdown', () => socket.send({ type: 'SET_SPEED', speed: s }));
-      this.speedButtons.push(btn);
-    });
-
-    // Shop instruction with keybind hints (Feature 1 & 5)
-    this.add.text(GRID_X, shopY + 80, '[1-5] Select shop | Click grid to place | Click tower for menu | [E] to sell selected', {
-      fontFamily: FONT, fontSize: '11px', color: '#666', fontStyle: 'bold',
-    }).setDepth(5);
-
-    // Feature 4: Create PvP panel
-    this.createPvPPanel();
-
-    // Tower hover tooltip
+    // Tower hover tooltip (keep as Phaser - follows mouse precisely)
     this.uiTowerHoverInfo = this.add.text(0, 0, '', {
       fontFamily: FONT, fontSize: '12px', color: '#ffffff',
       backgroundColor: '#0d1117cc',
@@ -1296,6 +1198,249 @@ export class GameScene extends Phaser.Scene {
       fixedWidth: 240,
       wordWrap: { width: 220 },
     }).setOrigin(0, 0).setDepth(10);
+  }
+
+  // ── DOM UI Overlay ────────────────────────────────────
+
+  private createDOMUI() {
+    this.destroyDOMUI();
+    const container = this.game.canvas.parentElement;
+    if (!container) return;
+    container.style.position = 'relative';
+
+    const W = 960, H = 720;
+    const pct = (gx: number, gy: number) => ({ left: `${(gx / W * 100).toFixed(2)}%`, top: `${(gy / H * 100).toFixed(2)}%` });
+
+    // Root overlay
+    const root = document.createElement('div');
+    root.id = 'game-ui';
+    Object.assign(root.style, {
+      position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
+      pointerEvents: 'none', zIndex: '5',
+      fontFamily: "'Chakra Petch', system-ui, sans-serif", color: '#e0e8ff', fontSize: '12px',
+    });
+    container.appendChild(root);
+    this.gameUiEl = root;
+
+    const mkDiv = (parent: HTMLElement, styles: Record<string, string> = {}): HTMLDivElement => {
+      const d = document.createElement('div');
+      Object.assign(d.style, styles);
+      parent.appendChild(d);
+      return d;
+    };
+
+    const btnBase: Record<string, string> = {
+      pointerEvents: 'auto', cursor: 'pointer', borderRadius: '6px',
+      fontFamily: "'Chakra Petch', system-ui, sans-serif", fontWeight: '600',
+      userSelect: 'none', textAlign: 'center', whiteSpace: 'nowrap',
+    };
+
+    // ── Mute button (top-right of grid area) ──
+    const mutePos = pct(GRID_X + GRID_PX - 30, 42);
+    const muteBtn = mkDiv(root, {
+      ...btnBase, position: 'absolute', ...mutePos,
+      fontSize: '18px', padding: '2px',
+    });
+    muteBtn.textContent = sfx.muted ? '🔇' : '🔊';
+    muteBtn.onclick = () => { const m = sfx.toggle(); muteBtn.textContent = m ? '🔇' : '🔊'; };
+
+    // ── Mob count ──
+    const mobPos = pct(GRID_X + GRID_PX - 140, 46);
+    this.domMobCount = mkDiv(root, {
+      position: 'absolute', ...mobPos, fontSize: '11px', color: '#888',
+    }) as HTMLSpanElement;
+
+    // ── Speed buttons ──
+    const speedY = GRID_Y - 28;
+    const speeds = [1, 2, 3, 5, 10];
+    const speedStartX = GRID_X + GRID_PX - speeds.length * 34;
+    this.domSpeedBtns = [];
+    speeds.forEach((s, i) => {
+      const sp = pct(speedStartX + i * 34, speedY);
+      const btn = mkDiv(root, {
+        ...btnBase, position: 'absolute', ...sp,
+        fontSize: '12px', padding: '3px 5px',
+        color: s === 1 ? '#0a0a14' : '#7a8aaa',
+        background: s === 1 ? '#00d4ff' : '#12122a',
+        border: '1px solid rgba(0,212,255,0.3)',
+      });
+      btn.textContent = `×${s}`;
+      btn.onclick = () => socket.send({ type: 'SET_SPEED', speed: s });
+      this.domSpeedBtns.push(btn);
+    });
+
+    // ── Opponents (left sidebar) ──
+    this.domOpponents = [];
+    for (let i = 0; i < 3; i++) {
+      const op = pct(10, GRID_Y + i * 70);
+      const d = mkDiv(root, {
+        position: 'absolute', ...op, fontSize: '13px', color: '#e0e8ff',
+        background: 'rgba(13,17,23,0.9)', padding: '6px 8px',
+        borderRadius: '6px', border: '1px solid rgba(0,212,255,0.2)',
+        width: '185px', lineHeight: '1.4',
+      });
+      this.domOpponents.push(d);
+    }
+
+    // ── PvP Panel (left sidebar, below opponents) ──
+    const pvpPos = pct(10, GRID_Y + 300);
+    this.domPvPPanel = mkDiv(root, {
+      position: 'absolute', ...pvpPos,
+      background: 'rgba(13,17,23,0.9)', padding: '8px',
+      borderRadius: '6px', border: '2px solid rgba(123,47,190,0.6)',
+      width: '200px', pointerEvents: 'auto',
+    });
+    this.buildPvPPanelDOM();
+
+    // ── Augment list (right sidebar) ──
+    const augPos = pct(GRID_X + GRID_PX + 10, GRID_Y);
+    this.domAugmentList = mkDiv(root, {
+      position: 'absolute', ...augPos, fontSize: '12px', color: '#e0e8ff',
+      background: 'rgba(13,17,23,0.9)', padding: '6px 8px',
+      borderRadius: '6px', border: '1px solid rgba(0,212,255,0.2)',
+      width: '180px', lineHeight: '1.5',
+    });
+
+    // ── Shop area ──
+    const shopY = GRID_Y + GRID_PX + 12;
+    
+    // Shop label
+    const labelPos = pct(GRID_X, shopY - 2);
+    this.domShopLabel = mkDiv(root, {
+      position: 'absolute', ...labelPos,
+      fontSize: '11px', color: '#666', fontWeight: '700',
+    });
+    this.domShopLabel.textContent = 'SPACE STATION — Buy 3 of same type → ★ upgrade';
+
+    // Shop slots
+    this.domShopSlots = [];
+    for (let i = 0; i < 5; i++) {
+      const x = GRID_X + i * 104;
+      // Keybind hint
+      const hintPos = pct(x + 38, shopY + 1);
+      mkDiv(root, {
+        position: 'absolute', ...hintPos,
+        fontSize: '10px', color: '#666', fontWeight: '700',
+        width: '22px', textAlign: 'center',
+      }).textContent = `[${i + 1}]`;
+
+      // Slot
+      const slotPos = pct(x, shopY + 14);
+      const slot = mkDiv(root, {
+        ...btnBase, position: 'absolute', ...slotPos,
+        fontSize: '14px', color: '#e0e8ff',
+        background: 'rgba(13,17,23,0.9)', padding: '8px 8px',
+        width: '110px', minHeight: '40px',
+        border: '1px solid rgba(0,212,255,0.3)',
+        lineHeight: '1.3', textAlign: 'left',
+      });
+      const idx = i;
+      slot.onclick = () => this.selectShopSlot(idx);
+      this.domShopSlots.push(slot);
+    }
+
+    // ── Buttons ──
+    const btnX = GRID_X + 5 * 104 + 8;
+
+    // Reroll
+    const rerollPos = pct(btnX, shopY + 14);
+    this.domRerollBtn = mkDiv(root, {
+      ...btnBase, position: 'absolute', ...rerollPos,
+      fontSize: '13px', color: '#0a0a14', background: '#ffc107',
+      padding: '7px 10px',
+    });
+    this.domRerollBtn.textContent = '🔄 [D] Reroll 2g';
+    this.domRerollBtn.onclick = () => socket.send({ type: 'REROLL' });
+
+    // Tech Tree
+    const techPos = pct(btnX, shopY + 50);
+    this.domTechTreeBtn = mkDiv(root, {
+      ...btnBase, position: 'absolute', ...techPos,
+      fontSize: '13px', color: '#e0e8ff', background: '#7b2fbe',
+      padding: '7px 10px',
+    });
+    this.domTechTreeBtn.textContent = 'TECH TREE';
+    this.domTechTreeBtn.onclick = () => this.showTechTree();
+
+    // Send Wave
+    const wavePos = pct(btnX, shopY + 86);
+    this.domSendWaveBtn = mkDiv(root, {
+      ...btnBase, position: 'absolute', ...wavePos,
+      fontSize: '13px', color: '#e0e8ff', background: '#ff4444',
+      padding: '7px 10px',
+    });
+    this.domSendWaveBtn.textContent = '▶ [Space] Send Wave';
+    this.domSendWaveBtn.onclick = () => socket.send({ type: 'DEV_START_COMBAT' });
+
+    // Instruction
+    const instrPos = pct(GRID_X, shopY + 80);
+    this.domInstruction = mkDiv(root, {
+      position: 'absolute', ...instrPos,
+      fontSize: '11px', color: '#666', fontWeight: '700',
+    });
+    this.domInstruction.textContent = '[1-5] Select shop | Click grid to place | Click tower for menu | [E] to sell selected';
+  }
+
+  private buildPvPPanelDOM() {
+    const panel = this.domPvPPanel;
+    if (!panel) return;
+    panel.innerHTML = '';
+
+    const title = document.createElement('div');
+    Object.assign(title.style, { fontSize: '14px', color: '#7b2fbe', fontWeight: '700', textAlign: 'center', marginBottom: '6px' });
+    title.textContent = 'PVP SEND';
+    panel.appendChild(title);
+
+    const unitTypes = ['pvp_grunt', 'pvp_runner', 'pvp_tank'];
+    const unitNames = ['Grunt', 'Runner', 'Tank'];
+    const unitCosts = [5, 8, 12];
+
+    unitTypes.forEach((unitType, i) => {
+      const btn = document.createElement('div');
+      Object.assign(btn.style, {
+        fontSize: '11px', color: '#e0e8ff', background: '#7b2fbe',
+        padding: '3px 6px', marginBottom: '4px', borderRadius: '4px',
+        cursor: 'pointer', pointerEvents: 'auto',
+      });
+      btn.textContent = `${unitNames[i]} (${unitCosts[i]}g)`;
+      btn.onclick = () => this.queuePvPUnit(unitType);
+      panel.appendChild(btn);
+    });
+
+    const targetRow = document.createElement('div');
+    Object.assign(targetRow.style, { fontSize: '11px', color: '#aaa', marginTop: '6px' });
+    targetRow.innerHTML = 'Target: ';
+    const targetBtn = document.createElement('span');
+    Object.assign(targetBtn.style, { color: '#00d4ff', cursor: 'pointer', pointerEvents: 'auto', background: '#0d1117', padding: '1px 4px', borderRadius: '3px' });
+    targetBtn.textContent = 'Click to cycle';
+    targetBtn.onclick = () => this.cycleTarget();
+    targetRow.appendChild(targetBtn);
+    panel.appendChild(targetRow);
+    (panel as any)._targetBtn = targetBtn;
+
+    const queueLabel = document.createElement('div');
+    Object.assign(queueLabel.style, { fontSize: '10px', color: '#666', marginTop: '4px' });
+    queueLabel.textContent = 'Queue: (empty)';
+    panel.appendChild(queueLabel);
+    (panel as any)._queueLabel = queueLabel;
+  }
+
+  private destroyDOMUI() {
+    if (this.gameUiEl) {
+      this.gameUiEl.remove();
+      this.gameUiEl = null;
+    }
+    this.domShopSlots = [];
+    this.domRerollBtn = null;
+    this.domTechTreeBtn = null;
+    this.domSendWaveBtn = null;
+    this.domInstruction = null;
+    this.domSpeedBtns = [];
+    this.domAugmentList = null;
+    this.domOpponents = [];
+    this.domPvPPanel = null;
+    this.domMobCount = null;
+    this.domShopLabel = null;
   }
 
   private createHUD() {
@@ -1347,11 +1492,12 @@ export class GameScene extends Phaser.Scene {
     if (this.hudLeft) this.hudLeft.textContent = `❤️ ${me.hp}   💰 ${me.gold}`;
     this.updatePhaseText();
 
-    // Shop (Feature 2: colored squares, no emojis)
-    // Check which shop slots enable upgrades
+    // Shop slots (DOM)
     const shopUpgradeSlots = this.getShopUpgradeSlots(me);
-    
+
     for (let i = 0; i < 5; i++) {
+      const slot = this.domShopSlots[i];
+      if (!slot) continue;
       const defId = me.shop[i];
       const isSelected = this.selectedShopIndex === i;
       const enablesUpgrade = shopUpgradeSlots.has(i);
@@ -1360,64 +1506,64 @@ export class GameScene extends Phaser.Scene {
         const def = TOWER_MAP[defId];
         if (def) {
           const color = SHOP_TOWER_COLORS[def.towerType] || '#888';
-          const displayText = `■ ${def.name}\n${def.cost}g`;
           const textColor = isSelected ? '#ffc107' : color;
-          const bgColor = isSelected ? '#2a2a0a' : enablesUpgrade ? '#1a2a1a' : '#0d1117cc';
-          this.uiShopSlots[i].setText(displayText).setColor(textColor).setBackgroundColor(bgColor);
-          // Pulsing border for upgrade-enabling slots
-          if (enablesUpgrade) {
-            const pulse = Math.sin(Date.now() / 300) > 0;
-            this.uiShopSlots[i].setStroke(pulse ? '#44ff44' : '#228822', 2);
-          } else {
-            this.uiShopSlots[i].setStroke('#000000', 0);
-          }
+          const bgColor = isSelected ? 'rgba(42,42,10,0.9)' : enablesUpgrade ? 'rgba(26,42,26,0.9)' : 'rgba(13,17,23,0.9)';
+          slot.innerHTML = `<span style="color:${color}">■</span> ${def.name}<br><span style="color:#ffc107">${def.cost}g</span>`;
+          slot.style.color = textColor;
+          slot.style.background = bgColor;
+          slot.style.borderColor = enablesUpgrade ? '#44ff44' : isSelected ? '#ffc107' : 'rgba(0,212,255,0.3)';
         }
       } else {
-        this.uiShopSlots[i].setText('  — empty —').setColor('#444').setBackgroundColor('#0d1117cc');
-        this.uiShopSlots[i].setStroke('#000000', 0);
+        slot.innerHTML = '<span style="color:#444">— empty —</span>';
+        slot.style.color = '#444';
+        slot.style.background = 'rgba(13,17,23,0.9)';
+        slot.style.borderColor = 'rgba(0,212,255,0.3)';
       }
     }
 
-    // Augment list with element + combo display
-    const augLines: string[] = [];
-    if (me.activeCombo) {
-      const combo = COMBO_MAP[me.activeCombo];
-      if (combo) {
-        augLines.push(`${combo.name.toUpperCase()}`);
-        augLines.push(`${combo.description}`);
-        augLines.push('');
+    // Augment list (DOM)
+    if (this.domAugmentList) {
+      let html = '';
+      if (me.activeCombo) {
+        const combo = COMBO_MAP[me.activeCombo];
+        if (combo) {
+          html += `<div style="color:${combo.color};font-weight:700">${combo.name.toUpperCase()}</div>`;
+          html += `<div style="font-size:11px;color:#aaa">${combo.description}</div><br>`;
+        }
+      } else if (me.elements && me.elements.length > 0) {
+        const activeElem = me.elements[me.elements.length - 1];
+        const emoji = ELEMENT_EMOJI[activeElem as Element] || '';
+        html += `<div style="font-weight:700">${emoji} ${activeElem.toUpperCase()}</div><br>`;
       }
-    } else if (me.elements && me.elements.length > 0) {
-      const activeElem = me.elements[me.elements.length - 1];
-      const emoji = ELEMENT_EMOJI[activeElem as Element] || '';
-      augLines.push(`${emoji} ${activeElem.toUpperCase()}`);
-      augLines.push('');
-    }
-    augLines.push('AUGMENTS');
-    if (me.augments.length > 0) {
-      for (const augId of me.augments) {
-        const aug = AUGMENT_POOL.find(a => a.id === augId);
-        if (aug) augLines.push(`  ${aug.name}`);
+      html += `<div style="font-weight:700;color:#00d4ff">AUGMENTS</div>`;
+      if (me.augments.length > 0) {
+        for (const augId of me.augments) {
+          const aug = AUGMENT_POOL.find(a => a.id === augId);
+          if (aug) html += `<div style="padding-left:4px">${aug.name}</div>`;
+        }
+      } else {
+        html += '<div style="color:#666;padding-left:4px">(none yet)</div>';
       }
-    } else {
-      augLines.push('  (none yet)');
+      this.domAugmentList.innerHTML = html;
     }
-    this.uiAugmentList.setText(augLines.join('\n'));
 
-    // Opponents
+    // Opponents (DOM)
     const opponents = this.gameState.players.filter((p) => p.id !== this.myId);
     opponents.forEach((opp, i) => {
-      if (i < this.uiOpponents.length) {
+      if (i < this.domOpponents.length) {
         const status = opp.alive ? `❤️ ${opp.hp}` : '💀';
         const augCount = opp.augments?.length || 0;
-        this.uiOpponents[i]
-          .setText(`${opp.name}\n${status}${augCount > 0 ? ` | ✨×${augCount}` : ''}`)
-          .setColor(PLAYER_COLOR_HEX[opp.color]);
+        const pColor = PLAYER_COLOR_HEX[opp.color];
+        this.domOpponents[i].innerHTML = `<span style="color:${pColor};font-weight:700">${opp.name}</span><br>${status}${augCount > 0 ? ` | ✨×${augCount}` : ''}`;
+        this.domOpponents[i].style.display = '';
       }
     });
-    for (let i = opponents.length; i < this.uiOpponents.length; i++) {
-      this.uiOpponents[i].setText('');
+    for (let i = opponents.length; i < this.domOpponents.length; i++) {
+      this.domOpponents[i].style.display = 'none';
     }
+
+    // Update PvP panel
+    this.updatePvPPanel();
   }
 
   private updatePhaseText() {
@@ -1705,61 +1851,7 @@ export class GameScene extends Phaser.Scene {
 
   // ── Feature 4: PvP Panel ───────────────────────────────
 
-  private createPvPPanel() {
-    const panelX = 10;
-    const panelY = GRID_Y + 300;
-    
-    this.pvpPanel = this.add.container(0, 0).setDepth(5);
-    
-    // Background
-    const panelBg = this.add.rectangle(panelX + 100, panelY + 80, 200, 160, 0x0d1117, 0.9);
-    panelBg.setStrokeStyle(2, 0x7b2fbe, 0.6);
-    this.pvpPanel!.add(panelBg);
-    
-    // Title
-    const title = this.add.text(panelX + 100, panelY + 10, 'PVP SEND', {
-      fontFamily: FONT, fontSize: '14px', color: '#7b2fbe', fontStyle: 'bold',
-    }).setOrigin(0.5, 0);
-    this.pvpPanel!.add(title);
-    
-    // Unit buttons
-    const unitTypes = ['pvp_grunt', 'pvp_runner', 'pvp_tank'];
-    const unitNames = ['Grunt', 'Runner', 'Tank'];
-    const unitCosts = [5, 8, 12];
-    
-    unitTypes.forEach((unitType, i) => {
-      const btnY = panelY + 35 + i * 25;
-      const btn = this.add.text(panelX + 20, btnY, `${unitNames[i]} (${unitCosts[i]}g)`, {
-        fontFamily: FONT, fontSize: '11px', color: '#e0e8ff', backgroundColor: '#7b2fbe',
-        padding: { x: 4, y: 3 },
-      }).setInteractive({ useHandCursor: true })
-        .on('pointerdown', () => this.queuePvPUnit(unitType));
-      this.pvpPanel!.add(btn);
-    });
-    
-    // Target selector
-    const targetLabel = this.add.text(panelX + 20, panelY + 120, 'Target:', {
-      fontFamily: FONT, fontSize: '11px', color: '#aaa',
-    });
-    this.pvpPanel!.add(targetLabel);
-    
-    const targetBtn = this.add.text(panelX + 60, panelY + 120, 'Click to cycle', {
-      fontFamily: FONT, fontSize: '11px', color: '#00d4ff', backgroundColor: '#0d1117',
-      padding: { x: 4, y: 2 },
-    }).setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => this.cycleTarget());
-    this.pvpPanel!.add(targetBtn);
-    
-    // Queue display area
-    const queueLabel = this.add.text(panelX + 20, panelY + 145, 'Queue: (empty)', {
-      fontFamily: FONT, fontSize: '10px', color: '#666',
-    });
-    this.pvpPanel!.add(queueLabel);
-    
-    // Store references for updates
-    (this.pvpPanel as any)._targetBtn = targetBtn;
-    (this.pvpPanel as any)._queueLabel = queueLabel;
-  }
+  // PvP panel is now DOM-based, created in createDOMUI/buildPvPPanelDOM
 
   private queuePvPUnit(unitType: string) {
     const opponents = this.gameState.players.filter(p => p.id !== this.myId && p.alive);
@@ -1778,32 +1870,31 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updatePvPPanel() {
-    if (!this.pvpPanel) return;
+    if (!this.domPvPPanel) return;
     
-    const targetBtn = (this.pvpPanel as any)._targetBtn;
-    const queueLabel = (this.pvpPanel as any)._queueLabel;
+    const targetBtn = (this.domPvPPanel as any)._targetBtn as HTMLSpanElement | undefined;
+    const queueLabel = (this.domPvPPanel as any)._queueLabel as HTMLDivElement | undefined;
+    if (!targetBtn || !queueLabel) return;
     
-    // Update target button
     const opponents = this.gameState.players.filter(p => p.id !== this.myId && p.alive);
     if (opponents.length > 0) {
       const target = opponents[this.pvpTargetIndex % opponents.length];
-      targetBtn.setText(target.name);
-      targetBtn.setStyle({ color: PLAYER_COLOR_HEX[target.color] });
+      targetBtn.textContent = target.name;
+      targetBtn.style.color = PLAYER_COLOR_HEX[target.color];
     } else {
-      targetBtn.setText('No targets');
-      targetBtn.setStyle({ color: '#666' });
+      targetBtn.textContent = 'No targets';
+      targetBtn.style.color = '#666';
     }
     
-    // Update queue display
     if (this.pvpQueue.length === 0) {
-      queueLabel.setText('Queue: (empty)');
+      queueLabel.textContent = 'Queue: (empty)';
     } else {
       const queueText = this.pvpQueue.map(entry => {
         const unitName = entry.unitType.replace('pvp_', '');
         const targetPlayer = this.gameState.players.find(p => p.id === entry.targetPlayerId);
         return `${unitName} → ${targetPlayer?.name || '?'}`;
       }).join(', ');
-      queueLabel.setText(`Queue: ${queueText}`);
+      queueLabel.textContent = `Queue: ${queueText}`;
     }
   }
 
@@ -1880,99 +1971,178 @@ export class GameScene extends Phaser.Scene {
 
   // ── Tech Tree Overlay (Feature 3) ─────────────────────
 
+  private techTreeDOM: HTMLDivElement | null = null;
+
   private showTechTree() {
     if (this.techTreeVisible) { this.hideTechTree(); return; }
     this.techTreeVisible = true;
-    
-    const cx = GRID_X + GRID_PX / 2;
-    const cy = GRID_Y + GRID_PX / 2;
-    
-    this.techTreeOverlay = this.add.container(0, 0).setDepth(20);
-    
-    // Backdrop
-    const backdrop = this.add.rectangle(cx, cy, GRID_PX + 200, GRID_PX + 100, 0x000000, 0.9)
-      .setInteractive();
-    this.techTreeOverlay.add(backdrop);
-    
-    // Title
-    const title = this.add.text(cx, cy - 230, 'ELEMENT COMBO TECH TREE', {
-      fontFamily: FONT, fontSize: '22px', color: '#FFD93D', fontStyle: 'bold',
-      stroke: '#000', strokeThickness: 3,
-    }).setOrigin(0.5);
-    this.techTreeOverlay.add(title);
 
-    // Close button
-    const closeBtn = this.add.text(cx + 280, cy - 230, '✕', {
-      fontFamily: FONT, fontSize: '20px', color: '#ff4444',
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => this.hideTechTree());
-    this.techTreeOverlay.add(closeBtn);
-    
     const me = this.me();
     const myElements = me?.elements || [];
-    const myCombo = me?.activeCombo;
-    
-    // Grid layout: 7 columns x 3 rows
-    const cols = 7;
-    const cardW = 78;
-    const cardH = 60;
-    const gap = 4;
-    const startX = cx - ((cols - 1) * (cardW + gap)) / 2;
-    const startY = cy - 150;
-    
-    COMBO_DEFS.forEach((combo, i) => {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const cardX = startX + col * (cardW + gap);
-      const cardY = startY + row * (cardH + gap + 20);
-      
-      const isActive = myCombo === combo.id;
-      const isPossible = myElements.includes(combo.elements[0]) || myElements.includes(combo.elements[1]);
-      const alpha = isActive ? 1 : isPossible ? 0.7 : 0.3;
-      
-      const bgColor = isActive ? Phaser.Display.Color.HexStringToColor(combo.color).color : 0x222233;
-      const card = this.add.rectangle(cardX, cardY, cardW, cardH, bgColor, alpha * 0.8);
-      if (isActive) card.setStrokeStyle(2, 0xffd93d);
-      else if (isPossible) card.setStrokeStyle(1, Phaser.Display.Color.HexStringToColor(combo.color).color);
-      this.techTreeOverlay!.add(card);
-      
-      // Element icons
-      const e1 = ELEMENT_EMOJI[combo.elements[0]] || '?';
-      const e2 = ELEMENT_EMOJI[combo.elements[1]] || '?';
-      const elemText = this.add.text(cardX, cardY - 12, `${e1}+${e2}`, {
-        fontFamily: FONT, fontSize: '11px', color: '#ffffff',
-      }).setOrigin(0.5).setAlpha(alpha);
-      this.techTreeOverlay!.add(elemText);
-      
-      // Combo name
-      const nameText = this.add.text(cardX, cardY + 8, combo.name, {
-        fontFamily: FONT, fontSize: '10px', color: combo.color, fontStyle: 'bold',
-      }).setOrigin(0.5).setAlpha(alpha);
-      this.techTreeOverlay!.add(nameText);
-      
-      // Hover for description
-      card.setInteractive();
-      card.on('pointerover', () => {
-        if (this.techTreeOverlay) {
-          // Show description tooltip
-          const desc = this.add.text(cardX, cardY + cardH / 2 + 10, combo.description, {
-            fontFamily: FONT, fontSize: '10px', color: '#cccccc', backgroundColor: '#000000cc',
-            padding: { x: 4, y: 2 },
-            wordWrap: { width: 160 },
-          }).setOrigin(0.5, 0).setDepth(25);
-          (card as any)._tooltip = desc;
-          this.techTreeOverlay!.add(desc);
-        }
+
+    // Find unlocked combos
+    const unlockedCombos = new Set<string>();
+    for (let i = 0; i < myElements.length; i++) {
+      for (let j = i + 1; j < myElements.length; j++) {
+        const combo = findCombo(myElements[i], myElements[j]);
+        if (combo) unlockedCombos.add(combo.id);
+      }
+    }
+
+    // Build DOM overlay
+    const container = document.getElementById('game-container');
+    if (!container) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'tech-tree-overlay';
+    Object.assign(overlay.style, {
+      position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
+      background: 'rgba(0,0,0,0.92)', zIndex: '50',
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      fontFamily: "'Chakra Petch', system-ui, sans-serif", color: '#e0e8ff',
+      overflow: 'auto', padding: '20px 10px',
+    });
+    container.appendChild(overlay);
+    this.techTreeDOM = overlay;
+
+    // Title bar
+    const titleBar = document.createElement('div');
+    Object.assign(titleBar.style, {
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      width: '100%', maxWidth: '800px', marginBottom: '16px',
+    });
+    const title = document.createElement('div');
+    title.textContent = 'ELEMENT COMBO TECH TREE';
+    Object.assign(title.style, { fontSize: '20px', fontWeight: 'bold', color: '#FFD93D' });
+    const closeBtn = document.createElement('div');
+    closeBtn.textContent = '✕';
+    Object.assign(closeBtn.style, {
+      fontSize: '22px', color: '#ff4444', cursor: 'pointer', padding: '4px 8px',
+    });
+    closeBtn.onclick = () => this.hideTechTree();
+    titleBar.appendChild(title);
+    titleBar.appendChild(closeBtn);
+    overlay.appendChild(titleBar);
+
+    // Element row (top level of tree)
+    const elemRow = document.createElement('div');
+    Object.assign(elemRow.style, {
+      display: 'flex', justifyContent: 'center', gap: '12px',
+      marginBottom: '8px', flexWrap: 'wrap',
+    });
+    overlay.appendChild(elemRow);
+
+    const elemPositions: Record<string, number> = {};
+    ALL_ELEMENTS.forEach((elem, i) => {
+      elemPositions[elem] = i;
+      const unlocked = myElements.includes(elem);
+      const node = document.createElement('div');
+      Object.assign(node.style, {
+        width: '80px', textAlign: 'center', padding: '8px 4px',
+        borderRadius: '8px', border: `2px solid ${unlocked ? ELEMENT_COLOR[elem] : '#333'}`,
+        background: unlocked ? 'rgba(255,255,255,0.08)' : 'rgba(30,30,40,0.8)',
+        opacity: unlocked ? '1' : '0.4',
+        transition: 'all 0.2s',
       });
-      card.on('pointerout', () => {
-        const tt = (card as any)._tooltip;
-        if (tt) { tt.destroy(); (card as any)._tooltip = null; }
+      node.innerHTML = `<div style="font-size:24px">${ELEMENT_EMOJI[elem]}</div>
+        <div style="font-size:11px;font-weight:bold;color:${ELEMENT_COLOR[elem]};margin-top:2px">${elem.toUpperCase()}</div>`;
+      elemRow.appendChild(node);
+    });
+
+    // Connector lines section + combo rows
+    // Group combos by "tier" (distance between parent elements)
+    const tiers: Record<number, typeof COMBO_DEFS> = {};
+    COMBO_DEFS.forEach(combo => {
+      const i1 = elemPositions[combo.elements[0]] ?? 0;
+      const i2 = elemPositions[combo.elements[1]] ?? 0;
+      const span = Math.abs(i2 - i1);
+      if (!tiers[span]) tiers[span] = [];
+      tiers[span].push(combo);
+    });
+
+    // SVG for connector lines
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const treeArea = document.createElement('div');
+    Object.assign(treeArea.style, {
+      position: 'relative', width: '100%', maxWidth: '800px',
+    });
+    overlay.appendChild(treeArea);
+
+    // Render combo tiers
+    const sortedSpans = Object.keys(tiers).map(Number).sort((a, b) => a - b);
+    sortedSpans.forEach(span => {
+      const tierCombos = tiers[span];
+
+      // Row label
+      const rowLabel = document.createElement('div');
+      rowLabel.textContent = span === 1 ? '── Adjacent Combos ──' : span === 2 ? '── Near Combos ──' : `── Distant Combos (${span}) ──`;
+      Object.assign(rowLabel.style, {
+        textAlign: 'center', color: '#555', fontSize: '10px',
+        margin: '12px 0 6px', letterSpacing: '2px',
+      });
+      treeArea.appendChild(rowLabel);
+
+      // Combo cards row
+      const row = document.createElement('div');
+      Object.assign(row.style, {
+        display: 'flex', justifyContent: 'center', gap: '8px',
+        flexWrap: 'wrap', marginBottom: '4px',
+      });
+      treeArea.appendChild(row);
+
+      tierCombos.forEach(combo => {
+        const hasE1 = myElements.includes(combo.elements[0]);
+        const hasE2 = myElements.includes(combo.elements[1]);
+        const unlocked = hasE1 && hasE2;
+        const partial = hasE1 || hasE2;
+
+        const card = document.createElement('div');
+        Object.assign(card.style, {
+          width: '105px', padding: '8px', borderRadius: '8px',
+          border: `2px solid ${unlocked ? combo.color : partial ? combo.color + '66' : '#222'}`,
+          background: unlocked ? combo.color + '22' : 'rgba(20,20,30,0.9)',
+          opacity: unlocked ? '1' : partial ? '0.7' : '0.35',
+          cursor: 'default', transition: 'all 0.2s', position: 'relative',
+        });
+
+        const e1emoji = ELEMENT_EMOJI[combo.elements[0]] || '?';
+        const e2emoji = ELEMENT_EMOJI[combo.elements[1]] || '?';
+
+        card.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span style="font-size:16px">${e1emoji}</span>
+            <span style="font-size:10px;color:#666">+</span>
+            <span style="font-size:16px">${e2emoji}</span>
+          </div>
+          <div style="font-size:12px;font-weight:bold;color:${combo.color}">${combo.name}</div>
+          <div style="font-size:10px;color:#999;margin-top:3px;line-height:1.3">${combo.description}</div>
+          ${unlocked ? '<div style="position:absolute;top:4px;right:6px;font-size:10px;color:#4f4">✓</div>' : ''}
+        `;
+        row.appendChild(card);
       });
     });
+
+    // Legend
+    const legend = document.createElement('div');
+    Object.assign(legend.style, {
+      display: 'flex', gap: '16px', justifyContent: 'center',
+      marginTop: '16px', fontSize: '11px', color: '#666',
+    });
+    legend.innerHTML = `
+      <span>🟢 Unlocked</span>
+      <span>🟡 Partially unlocked</span>
+      <span>⚫ Locked</span>
+    `;
+    treeArea.appendChild(legend);
   }
 
   private hideTechTree() {
     this.techTreeVisible = false;
+    if (this.techTreeDOM) {
+      this.techTreeDOM.remove();
+      this.techTreeDOM = null;
+    }
+    // Also clean up old Phaser overlay if exists
     if (this.techTreeOverlay) {
       this.techTreeOverlay.destroy();
       this.techTreeOverlay = null;
