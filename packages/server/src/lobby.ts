@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import type { Client } from './index.js';
-import type { ClientMsg, ServerMsg, LobbyPlayer, GameConfig } from '@ect/shared';
+import type { ClientMsg, ServerMsg, LobbyPlayer, GameConfig, PlayerColor } from '@ect/shared';
 import { MAX_PLAYERS, MIN_PLAYERS, PLAYER_COLORS, DEFAULT_GAME_CONFIG } from '@ect/shared';
 import { createGame, getGameForPlayer } from './game.js';
 
@@ -8,6 +8,7 @@ interface Room {
   code: string;
   clients: Client[];
   names: Map<string, string>;   // clientId → playerName
+  colors: Map<string, PlayerColor>; // clientId → chosen color (Feature 3)
   ready: Set<string>;
   started: boolean;
   hostId: string;               // first player to join is host
@@ -27,6 +28,7 @@ function cleanupPlayerFromRooms(client: Client) {
     if (oldRoom) {
       oldRoom.clients = oldRoom.clients.filter((c) => c.id !== client.id);
       oldRoom.names.delete(client.id);
+      oldRoom.colors.delete(client.id);
       oldRoom.ready.delete(client.id);
       if (oldRoom.clients.length === 0) {
         rooms.delete(client.roomCode);
@@ -42,6 +44,7 @@ function cleanupPlayerFromRooms(client: Client) {
     room.clients = room.clients.filter((c) => c.id !== client.id);
     if (room.clients.length < oldLength) {
       room.names.delete(client.id);
+      room.colors.delete(client.id);
       room.ready.delete(client.id);
       if (room.clients.length === 0) {
         rooms.delete(code);
@@ -62,6 +65,7 @@ function broadcastLobby(room: Room) {
     id: c.id,
     name: room.names.get(c.id) || 'Unknown',
     ready: room.ready.has(c.id),
+    color: room.colors.get(c.id),
   }));
   room.clients.forEach((c) => {
     const msg: ServerMsg = {
@@ -112,6 +116,7 @@ export function handleMessage(client: Client, msg: ClientMsg) {
           code,
           clients: [],
           names: new Map(),
+          colors: new Map(),
           ready: new Set(),
           started: false,
           hostId: client.id,
@@ -170,8 +175,32 @@ export function handleMessage(client: Client, msg: ClientMsg) {
       if (canStart) {
         room.started = true;
         console.log(`[game] Starting in room ${room.code} with ${room.clients.length} players, config:`, room.config);
-        createGame(room.clients, room.names, room.config);
+        createGame(room.clients, room.names, room.colors, room.config);
       }
+      break;
+    }
+
+    case 'SET_COLOR': {
+      // Feature 3: Lobby color picker
+      if (!client.roomCode) return;
+      const room = rooms.get(client.roomCode);
+      if (!room || room.started) return;
+      
+      // Check if color is available
+      const takenColors = new Set(Array.from(room.colors.values()));
+      if (takenColors.has(msg.color)) {
+        send(client, { type: 'ERROR', message: 'Color already taken' });
+        return;
+      }
+      
+      // Validate color
+      if (!PLAYER_COLORS.includes(msg.color)) {
+        send(client, { type: 'ERROR', message: 'Invalid color' });
+        return;
+      }
+      
+      room.colors.set(client.id, msg.color);
+      broadcastLobby(room);
       break;
     }
 

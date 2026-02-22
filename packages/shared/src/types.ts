@@ -137,7 +137,9 @@ export type ClientMsg =
   | { type: 'PICK_AUGMENT'; augmentId: string }
   | { type: 'UPGRADE_TOWER'; towerId: string }
   | { type: 'DEV_START_COMBAT' }
-  | { type: 'SET_SPEED'; speed: number };
+  | { type: 'SET_SPEED'; speed: number }
+  | { type: 'SET_COLOR'; color: PlayerColor } // Feature 3: Lobby color picker
+  | { type: 'QUEUE_PVP_UNIT'; unitType: string; targetPlayerId: string }; // Feature 4: PvP queue
 
 // Server → Client
 export type ServerMsg =
@@ -159,7 +161,9 @@ export type ServerMsg =
   | { type: 'COMBO_UNLOCKED'; playerId: string; comboId: string; comboName: string; comboColor: string }
   | { type: 'PLAYER_ELIMINATED'; playerId: string }
   | { type: 'GAME_OVER'; winnerId: string }
-  | { type: 'ERROR'; message: string };
+  | { type: 'ERROR'; message: string }
+  | { type: 'NEXT_WAVE_INFO'; mobType: string; element?: Element; count: number; hp: number } // Feature 2: Next wave info
+  | { type: 'PVP_QUEUE_UPDATE'; queue: PvPQueueEntry[] }; // Feature 4: PvP queue update
 
 export interface CombatAttack {
   towerX: number;
@@ -185,4 +189,19 @@ export interface LobbyPlayer {
   id: string;
   name: string;
   ready: boolean;
+  color?: PlayerColor; // Feature 3: Lobby color picker
+}
+
+// ── PvP Queue (Feature 4) ───────────────────────────────
+
+export interface PvPQueueEntry {
+  unitType: string;
+  targetPlayerId: string;
+}
+
+export interface PvPUnitDef {
+  id: string;
+  cost: number;
+  hp_mult: number;
+  speed_mult?: number;
 }

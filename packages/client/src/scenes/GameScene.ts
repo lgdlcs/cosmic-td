@@ -8,6 +8,7 @@ import type {
   MobInstance,
   CombatAttack,
   GridPos,
+  PvPQueueEntry,
 } from '@ect/shared';
 import {
   GRID_SIZE,
@@ -27,6 +28,7 @@ import {
   COMBO_DEFS,
   COMBO_MAP,
   getActiveCombo,
+  PVP_UNIT_DEFS,
 } from '@ect/shared';
 import type { Element, TowerTier } from '@ect/shared';
 import type { ElementCombo } from '@ect/shared';
@@ -169,9 +171,18 @@ export class GameScene extends Phaser.Scene {
   private techTreeOverlay: Phaser.GameObjects.Container | null = null;
   private techTreeVisible = false;
 
-  // Upgrade UI
-  private upgradeButton: Phaser.GameObjects.Text | null = null;
-  private selectedTowerForUpgrade: string | null = null;
+  // Old upgrade UI removed - replaced by Feature 5
+  // Feature 5: Tower selection system (replacing upgrade button)
+  private selectedTowerId: string | null = null;
+  private towerActionMenu: Phaser.GameObjects.Container | null = null;
+
+  // Feature 4: PvP queue
+  private pvpPanel: Phaser.GameObjects.Container | null = null;
+  private pvpQueue: PvPQueueEntry[] = [];
+  private pvpTargetIndex: number = 0;
+
+  // Feature 2: Next wave info
+  private nextWaveInfo: { mobType: string; element?: Element; count: number; hp: number } | null = null;
 
   // Shop slot graphics for colored squares
   private shopSlotGraphics: Phaser.GameObjects.Graphics | null = null;
@@ -247,10 +258,49 @@ export class GameScene extends Phaser.Scene {
       this.updateTowerHover(ptr);
     });
 
+    // Feature 1: Keyboard shortcuts
     this.input.keyboard?.on('keydown-ESC', () => {
       this.selectedShopIndex = -1;
       this.selectedTowerDefId = null;
+      this.selectedTowerId = null;
+      this.hideTowerActionMenu();
       this.updateUI();
+    });
+
+    // Feature 1: TFT-style keyboard shortcuts
+    this.input.keyboard?.on('keydown-D', () => {
+      if (this.gameState.phase === 'shopping') {
+        socket.send({ type: 'REROLL' });
+      }
+    });
+
+    this.input.keyboard?.on('keydown-E', () => {
+      if (this.gameState.phase === 'shopping' && this.selectedTowerId) {
+        socket.send({ type: 'SELL_TOWER', instanceId: this.selectedTowerId });
+        this.selectedTowerId = null;
+        this.hideTowerActionMenu();
+      }
+    });
+
+    this.input.keyboard?.on('keydown-SPACE', () => {
+      if (this.gameState.phase === 'shopping') {
+        socket.send({ type: 'DEV_START_COMBAT' });
+      }
+    });
+
+    // Feature 1: Shop slot selection (1-5)
+    for (let i = 1; i <= 5; i++) {
+      this.input.keyboard?.on(`keydown-${i}`, () => {
+        if (this.gameState.phase === 'shopping') {
+          this.selectShopSlot(i - 1);
+        }
+      });
+    }
+
+    // Feature 1: Tab to cycle opponents (placeholder)
+    this.input.keyboard?.on('keydown-TAB', (event: KeyboardEvent) => {
+      event.preventDefault();
+      // Cycle through opponent highlights in UI (visual only for now)
     });
 
     this.msgHandler = (msg) => this.handleMsg(msg);
@@ -262,6 +312,9 @@ export class GameScene extends Phaser.Scene {
     if (this.msgHandler) socket.offMessage(this.msgHandler);
     if (this.timerEvent) this.timerEvent.destroy();
     if (this.augmentOverlay) this.augmentOverlay.destroy();
+    if (this.towerActionMenu) this.towerActionMenu.destroy();
+    if (this.pvpPanel) this.pvpPanel.destroy();
+    if (this.techTreeOverlay) this.techTreeOverlay.destroy();
   }
 
   update(_time: number, delta: number) {
@@ -361,7 +414,7 @@ export class GameScene extends Phaser.Scene {
             const cy = GRID_Y + tower.position.row * CELL + CELL / 2;
             this.showUpgradeAnimation(cx, cy, msg.newTier);
           }
-          this.hideUpgradeButton();
+          this.hideTowerActionMenu();
         }
         break;
       }
@@ -376,6 +429,15 @@ export class GameScene extends Phaser.Scene {
       case 'SPEED_CHANGE':
         this.currentSpeed = msg.speed;
         this.updateSpeedButtons();
+        break;
+
+      case 'NEXT_WAVE_INFO': // Feature 2: Next wave info
+        this.nextWaveInfo = msg;
+        break;
+
+      case 'PVP_QUEUE_UPDATE': // Feature 4: PvP queue update
+        this.pvpQueue = msg.queue;
+        this.updatePvPPanel();
         break;
 
       case 'GAME_OVER':
@@ -1019,6 +1081,19 @@ export class GameScene extends Phaser.Scene {
         this.towerGfx.lineStyle(2, 0x44ff44, pulse);
         this.towerGfx.strokeCircle(cx, cy, size + 6);
       }
+
+      // Feature 5: Selected tower highlight
+      if (this.selectedTowerId === tower.instanceId) {
+        this.towerGfx.lineStyle(3, 0x00d4ff, 0.9);
+        this.towerGfx.strokeCircle(cx, cy, size + 10);
+        // Always show range for selected tower
+        if (stats.range > 0) {
+          this.towerGfx.fillStyle(elemColor, 0.1);
+          this.towerGfx.fillCircle(cx, cy, stats.range * CELL);
+          this.towerGfx.lineStyle(2, elemColor, 0.6);
+          this.towerGfx.strokeCircle(cx, cy, stats.range * CELL);
+        }
+      }
     }
   }
 
@@ -1118,13 +1193,19 @@ export class GameScene extends Phaser.Scene {
       lineSpacing: 4,
     }).setDepth(5);
 
-    // Shop
+    // Shop with keybind hints (Feature 1)
     this.add.text(GRID_X, shopY - 2, 'SPACE STATION — Buy 3 of same type → ★ upgrade', {
       fontSize: '11px', color: '#666', fontStyle: 'bold',
     }).setDepth(5);
 
     for (let i = 0; i < 5; i++) {
       const x = GRID_X + i * 104;
+      
+      // Feature 1: Add keybind hint above slot
+      this.add.text(x + 49, shopY + 3, `[${i + 1}]`, {
+        fontSize: '10px', color: '#666', fontStyle: 'bold',
+      }).setOrigin(0.5, 0).setDepth(5);
+      
       const txt = this.add.text(x, shopY + 14, '', {
         fontSize: '12px', color: '#e0e8ff',
         backgroundColor: '#0d1117cc',
@@ -1138,9 +1219,9 @@ export class GameScene extends Phaser.Scene {
       this.uiShopSlots.push(txt);
     }
 
-    // Buttons
+    // Buttons with keybind hints (Feature 1)
     const btnX = GRID_X + 5 * 104 + 8;
-    this.add.text(btnX, shopY + 14, '🔄 Reroll 2g', {
+    this.add.text(btnX, shopY + 14, '🔄 [D] Reroll 2g', {
       fontSize: '13px', color: '#0a0a14', backgroundColor: '#ffc107',
       padding: { x: 8, y: 8 },
     }).setDepth(5).setInteractive({ useHandCursor: true })
@@ -1152,7 +1233,7 @@ export class GameScene extends Phaser.Scene {
     }).setDepth(5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => this.showTechTree());
 
-    this.add.text(btnX, shopY + 86, '▶ SEND WAVE', {
+    this.add.text(btnX, shopY + 86, '▶ [Space] Send Wave', {
       fontSize: '13px', color: '#e0e8ff', backgroundColor: '#ff4444',
       padding: { x: 8, y: 8 },
     }).setDepth(5).setInteractive({ useHandCursor: true })
@@ -1174,10 +1255,13 @@ export class GameScene extends Phaser.Scene {
       this.speedButtons.push(btn);
     });
 
-    // Shop instruction
-    this.add.text(GRID_X, shopY + 80, 'Click shop slot → Click grid to place | Click placed tower to sell', {
+    // Shop instruction with keybind hints (Feature 1 & 5)
+    this.add.text(GRID_X, shopY + 80, '[1-5] Select shop | Click grid to place | Click tower for menu | [E] to sell selected', {
       fontSize: '11px', color: '#666', fontStyle: 'bold',
     }).setDepth(5);
+
+    // Feature 4: Create PvP panel
+    this.createPvPPanel();
 
     // Tower hover tooltip
     this.uiTowerHoverInfo = this.add.text(0, 0, '', {
@@ -1281,7 +1365,24 @@ export class GameScene extends Phaser.Scene {
     const phase = phaseMap[this.gameState.phase] || this.gameState.phase;
     const timer = this.localTimer > 0 ? `⏱ ${this.localTimer}s` : '';
     const streakText = streak > 0 ? `  🔥×${streak}` : '';
-    this.uiTopRight.setText(`📍 Round ${this.gameState.round}/30  ${phase}  ${timer}${streakText}`);
+    
+    // Feature 2: Add next wave info to top bar
+    let nextWaveText = '';
+    if (this.nextWaveInfo && this.gameState.phase === 'shopping') {
+      const typeIcons: Record<string, string> = {
+        boss: '👑',
+        tank: '🛡️',
+        runner: '🏃',
+        swarm: '🐛',
+      };
+      const icon = typeIcons[this.nextWaveInfo.mobType] || '👹';
+      const elementText = this.nextWaveInfo.element ? 
+        ` — ${ELEMENT_EMOJI[this.nextWaveInfo.element] || '?'} ${this.nextWaveInfo.element}` : 
+        (this.gameState.round >= 2 ? ' — Random' : '');
+      nextWaveText = `  | Next: ${icon} ${this.nextWaveInfo.mobType} ×${this.nextWaveInfo.count} — HP: ${this.nextWaveInfo.hp}${elementText}`;
+    }
+    
+    this.uiTopRight.setText(`📍 Round ${this.gameState.round}/30  ${phase}  ${timer}${streakText}${nextWaveText}`);
   }
 
   // ── Actions ───────────────────────────────────────────
@@ -1302,30 +1403,37 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onGridClick(pos: GridPos) {
-    
     const me = this.me();
     if (!me) return;
 
-    // Click on existing tower = upgrade if available, else sell
+    // Feature 5: Click on existing tower = select and show action menu
     const existingTower = me.towers.find(t => t.position.row === pos.row && t.position.col === pos.col);
     if (existingTower) {
-      if (this.gameState.phase === 'shopping' && existingTower.canUpgrade) {
-        this.showUpgradeButton(existingTower.instanceId, pos);
-      } else if (this.gameState.phase === 'shopping') {
-        socket.send({ type: 'SELL_TOWER', instanceId: existingTower.instanceId });
-      }
+      this.selectedTowerId = existingTower.instanceId;
+      this.showTowerActionMenu(existingTower.instanceId);
+      this.selectedShopIndex = -1;
+      this.selectedTowerDefId = null;
+      this.updateUI();
       return;
     }
 
-    // Place tower from shop
-    if (this.selectedShopIndex < 0 || !this.selectedTowerDefId) return;
-    if (isPathCell(this.mapDef, pos)) return;
-
-    socket.send({ type: 'BUY_AND_PLACE', shopIndex: this.selectedShopIndex, position: pos });
-    sfx.towerPlace();
-    this.selectedShopIndex = -1;
-    this.selectedTowerDefId = null;
-    this.updateUI();
+    // Click on empty cell - place tower if shop item selected, else deselect
+    if (this.selectedShopIndex >= 0 && this.selectedTowerDefId) {
+      if (isPathCell(this.mapDef, pos)) return;
+      
+      socket.send({ type: 'BUY_AND_PLACE', shopIndex: this.selectedShopIndex, position: pos });
+      sfx.towerPlace();
+      this.selectedShopIndex = -1;
+      this.selectedTowerDefId = null;
+      this.updateUI();
+    } else {
+      // Deselect everything
+      this.selectedTowerId = null;
+      this.hideTowerActionMenu();
+      this.selectedShopIndex = -1;
+      this.selectedTowerDefId = null;
+      this.updateUI();
+    }
   }
 
   // ── Opponent Mini-View ─────────────────────────────────
@@ -1366,50 +1474,186 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // ── Upgrade System ─────────────────────────────────────
+  // ── Feature 5: Tower Action Menu ──────────────────────
 
-  private showUpgradeButton(towerId: string, pos: GridPos) {
-    this.hideUpgradeButton();
-    this.selectedTowerForUpgrade = towerId;
-    const x = GRID_X + pos.col * CELL + CELL / 2;
-    const y = GRID_Y + pos.row * CELL - 20;
-
-    this.upgradeButton = this.add.text(x, y, '⬆ UPGRADE', {
-      fontSize: '13px', color: '#0a0a14', backgroundColor: '#44ff44',
-      padding: { x: 8, y: 4 },
-      fontStyle: 'bold',
-    }).setOrigin(0.5).setDepth(15).setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => {
-        if (this.selectedTowerForUpgrade) {
-          socket.send({ type: 'UPGRADE_TOWER', towerId: this.selectedTowerForUpgrade });
-        }
-        this.hideUpgradeButton();
-      });
-
-    // Also add sell button next to it
-    const sellBtn = this.add.text(x, y + 22, 'SELL', {
-      fontSize: '11px', color: '#e0e8ff', backgroundColor: '#ff444488',
+  private showTowerActionMenu(towerId: string) {
+    this.hideTowerActionMenu();
+    
+    const me = this.me();
+    if (!me) return;
+    
+    const tower = me.towers.find(t => t.instanceId === towerId);
+    if (!tower) return;
+    
+    const def = TOWER_MAP[tower.defId];
+    if (!def) return;
+    
+    const x = GRID_X + tower.position.col * CELL + CELL / 2;
+    const y = GRID_Y + tower.position.row * CELL + CELL / 2;
+    
+    this.towerActionMenu = this.add.container(0, 0).setDepth(20);
+    
+    // Background panel
+    const panelW = 120;
+    const panelH = tower.canUpgrade && this.gameState.phase === 'shopping' ? 100 : 80;
+    const panel = this.add.rectangle(x + 50, y - 10, panelW, panelH, 0x0d1117, 0.95);
+    panel.setStrokeStyle(2, 0x00d4ff, 0.8);
+    this.towerActionMenu.add(panel);
+    
+    let btnY = y - 35;
+    const btnSpacing = 25;
+    
+    // Upgrade button (only if can upgrade and shopping phase)
+    if (tower.canUpgrade && this.gameState.phase === 'shopping') {
+      const upgradeBtn = this.add.text(x + 50, btnY, '⬆ UPGRADE', {
+        fontSize: '12px', color: '#0a0a14', backgroundColor: '#44ff44',
+        padding: { x: 6, y: 4 }, fontStyle: 'bold',
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => {
+          socket.send({ type: 'UPGRADE_TOWER', towerId });
+          this.hideTowerActionMenu();
+        });
+      this.towerActionMenu.add(upgradeBtn);
+      btnY += btnSpacing;
+    }
+    
+    // Sell button (only during shopping)
+    if (this.gameState.phase === 'shopping') {
+      const copies = tower.stars >= 3 ? 9 : tower.stars >= 2 ? 3 : 1;
+      const sellPrice = Math.floor(def.cost * copies * 0.7);
+      const sellBtn = this.add.text(x + 50, btnY, `💰 SELL (${sellPrice}g)`, {
+        fontSize: '11px', color: '#e0e8ff', backgroundColor: '#ff4444aa',
+        padding: { x: 6, y: 3 },
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => {
+          socket.send({ type: 'SELL_TOWER', instanceId: towerId });
+          this.hideTowerActionMenu();
+        });
+      this.towerActionMenu.add(sellBtn);
+      btnY += btnSpacing;
+    }
+    
+    // Info button
+    const infoBtn = this.add.text(x + 50, btnY, 'ℹ INFO', {
+      fontSize: '11px', color: '#e0e8ff', backgroundColor: '#7b2fbe',
       padding: { x: 6, y: 3 },
-    }).setOrigin(0.5).setDepth(15).setInteractive({ useHandCursor: true })
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => {
-        if (this.selectedTowerForUpgrade) {
-          socket.send({ type: 'SELL_TOWER', instanceId: this.selectedTowerForUpgrade });
-        }
-        this.hideUpgradeButton();
+        // Show detailed info - for now just close menu
+        this.hideTowerActionMenu();
       });
-
-    // Store sell button on upgrade button for cleanup
-    (this.upgradeButton as any)._sellBtn = sellBtn;
+    this.towerActionMenu.add(infoBtn);
   }
 
-  private hideUpgradeButton() {
-    if (this.upgradeButton) {
-      const sellBtn = (this.upgradeButton as any)._sellBtn;
-      if (sellBtn) sellBtn.destroy();
-      this.upgradeButton.destroy();
-      this.upgradeButton = null;
+  private hideTowerActionMenu() {
+    if (this.towerActionMenu) {
+      this.towerActionMenu.destroy();
+      this.towerActionMenu = null;
     }
-    this.selectedTowerForUpgrade = null;
+  }
+
+  // ── Feature 4: PvP Panel ───────────────────────────────
+
+  private createPvPPanel() {
+    const panelX = 10;
+    const panelY = GRID_Y + 300;
+    
+    this.pvpPanel = this.add.container(0, 0).setDepth(5);
+    
+    // Background
+    const panelBg = this.add.rectangle(panelX + 100, panelY + 80, 200, 160, 0x0d1117, 0.9);
+    panelBg.setStrokeStyle(2, 0x7b2fbe, 0.6);
+    this.pvpPanel!.add(panelBg);
+    
+    // Title
+    const title = this.add.text(panelX + 100, panelY + 10, 'PVP SEND', {
+      fontSize: '14px', color: '#7b2fbe', fontStyle: 'bold',
+    }).setOrigin(0.5, 0);
+    this.pvpPanel!.add(title);
+    
+    // Unit buttons
+    const unitTypes = ['pvp_grunt', 'pvp_runner', 'pvp_tank'];
+    const unitNames = ['Grunt', 'Runner', 'Tank'];
+    const unitCosts = [5, 8, 12];
+    
+    unitTypes.forEach((unitType, i) => {
+      const btnY = panelY + 35 + i * 25;
+      const btn = this.add.text(panelX + 20, btnY, `${unitNames[i]} (${unitCosts[i]}g)`, {
+        fontSize: '11px', color: '#e0e8ff', backgroundColor: '#7b2fbe',
+        padding: { x: 4, y: 3 },
+      }).setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => this.queuePvPUnit(unitType));
+      this.pvpPanel!.add(btn);
+    });
+    
+    // Target selector
+    const targetLabel = this.add.text(panelX + 20, panelY + 120, 'Target:', {
+      fontSize: '11px', color: '#aaa',
+    });
+    this.pvpPanel!.add(targetLabel);
+    
+    const targetBtn = this.add.text(panelX + 60, panelY + 120, 'Click to cycle', {
+      fontSize: '11px', color: '#00d4ff', backgroundColor: '#0d1117',
+      padding: { x: 4, y: 2 },
+    }).setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.cycleTarget());
+    this.pvpPanel!.add(targetBtn);
+    
+    // Queue display area
+    const queueLabel = this.add.text(panelX + 20, panelY + 145, 'Queue: (empty)', {
+      fontSize: '10px', color: '#666',
+    });
+    this.pvpPanel!.add(queueLabel);
+    
+    // Store references for updates
+    (this.pvpPanel as any)._targetBtn = targetBtn;
+    (this.pvpPanel as any)._queueLabel = queueLabel;
+  }
+
+  private queuePvPUnit(unitType: string) {
+    const opponents = this.gameState.players.filter(p => p.id !== this.myId && p.alive);
+    if (opponents.length === 0) return;
+    
+    const target = opponents[this.pvpTargetIndex % opponents.length];
+    socket.send({ type: 'QUEUE_PVP_UNIT', unitType, targetPlayerId: target.id });
+  }
+
+  private cycleTarget() {
+    const opponents = this.gameState.players.filter(p => p.id !== this.myId && p.alive);
+    if (opponents.length === 0) return;
+    
+    this.pvpTargetIndex = (this.pvpTargetIndex + 1) % opponents.length;
+    this.updatePvPPanel();
+  }
+
+  private updatePvPPanel() {
+    if (!this.pvpPanel) return;
+    
+    const targetBtn = (this.pvpPanel as any)._targetBtn;
+    const queueLabel = (this.pvpPanel as any)._queueLabel;
+    
+    // Update target button
+    const opponents = this.gameState.players.filter(p => p.id !== this.myId && p.alive);
+    if (opponents.length > 0) {
+      const target = opponents[this.pvpTargetIndex % opponents.length];
+      targetBtn.setText(target.name);
+      targetBtn.setStyle({ color: PLAYER_COLOR_HEX[target.color] });
+    } else {
+      targetBtn.setText('No targets');
+      targetBtn.setStyle({ color: '#666' });
+    }
+    
+    // Update queue display
+    if (this.pvpQueue.length === 0) {
+      queueLabel.setText('Queue: (empty)');
+    } else {
+      const queueText = this.pvpQueue.map(entry => {
+        const unitName = entry.unitType.replace('pvp_', '');
+        const targetPlayer = this.gameState.players.find(p => p.id === entry.targetPlayerId);
+        return `${unitName} → ${targetPlayer?.name || '?'}`;
+      }).join(', ');
+      queueLabel.setText(`Queue: ${queueText}`);
+    }
   }
 
   private showUpgradeAnimation(x: number, y: number, tier: TowerTier) {

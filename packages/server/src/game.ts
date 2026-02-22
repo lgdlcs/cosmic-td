@@ -11,6 +11,7 @@ import type {
   TowerInstance,
   PlayerColor,
   GridPos,
+  PvPQueueEntry,
 } from '@ect/shared';
 import {
   DEFAULT_GAME_CONFIG,
@@ -32,6 +33,9 @@ import {
   AUGMENT_POOL,
   randomElement,
   getActiveCombo,
+  PVP_UNIT_DEFS,
+  MOB_BASE_HP,
+  MOB_HP_SCALE,
 } from '@ect/shared';
 import type { TowerTier } from '@ect/shared';
 import { ShopManager } from './shop.js';
@@ -55,8 +59,10 @@ export class Game {
   config: GameConfig;
   /** Track which players have picked augments this round */
   augmentPicked: Set<string> = new Set();
+  /** PvP unit queues per player (Feature 4) */
+  pvpQueues: Map<string, PvPQueueEntry[]> = new Map();
 
-  constructor(clients: Client[], names: Map<string, string>, config: GameConfig = DEFAULT_GAME_CONFIG) {
+  constructor(clients: Client[], names: Map<string, string>, colors: Map<string, PlayerColor>, config: GameConfig = DEFAULT_GAME_CONFIG) {
     this.config = config;
     this.map = ALL_MAPS[Math.floor(Math.random() * ALL_MAPS.length)];
 
@@ -72,7 +78,7 @@ export class Game {
     const players: PlayerState[] = playerIds.map((id, i) => ({
       id,
       name: names.get(id) || `Player ${i + 1}`,
-      color: PLAYER_COLORS[i] as PlayerColor,
+      color: colors.get(id) || PLAYER_COLORS[i] as PlayerColor, // Use chosen color or fallback to index-based
       hp: config.startingHp,
       gold: config.startingGold,
       towers: [],
@@ -232,6 +238,34 @@ export class Game {
         this.broadcast({ type: 'SPEED_CHANGE', speed: s });
         break;
       }
+      case 'QUEUE_PVP_UNIT': {
+        // Feature 4: PvP unit queueing
+        if (this.state.phase !== 'shopping') return;
+        
+        const unitDef = PVP_UNIT_DEFS[msg.unitType as keyof typeof PVP_UNIT_DEFS];
+        if (!unitDef) return;
+        
+        // Validate target player exists and is alive
+        const targetPlayer = this.state.players.find(p => p.id === msg.targetPlayerId && p.alive);
+        if (!targetPlayer || targetPlayer.id === playerId) return;
+        
+        // Check if player has enough gold
+        if (player.gold < unitDef.cost) return;
+        
+        // Deduct cost and add to queue
+        player.gold -= unitDef.cost;
+        
+        if (!this.pvpQueues.has(playerId)) {
+          this.pvpQueues.set(playerId, []);
+        }
+        const queue = this.pvpQueues.get(playerId)!;
+        queue.push({ unitType: msg.unitType, targetPlayerId: msg.targetPlayerId });
+        
+        // Send queue update to sender
+        this.sendTo(playerId, { type: 'PVP_QUEUE_UPDATE', queue: [...queue] });
+        this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
+        break;
+      }
     }
   }
 
@@ -256,6 +290,53 @@ export class Game {
         } as ServerMsg);
         client.ws.send(msg);
       }
+    });
+  }
+
+  // Feature 2: Broadcast next wave information
+  broadcastNextWaveInfo() {
+    const nextRound = this.state.round + 1;
+    if (nextRound > TOTAL_ROUNDS) return;
+
+    const isBoss = [5, 10, 15, 20, 25, 30].includes(nextRound);
+    const baseHp = Math.floor(MOB_BASE_HP * Math.pow(MOB_HP_SCALE, nextRound - 1));
+    const baseCount = Math.floor(5 + 0.4 * nextRound);
+
+    let mobType: string;
+    let count: number;
+    let hp: number;
+
+    if (isBoss) {
+      mobType = 'boss';
+      count = nextRound >= 20 ? 2 : 1;
+      hp = Math.floor(baseHp * 5); // BOSS_HP_MULT
+    } else {
+      const isSwarmRound = nextRound % 3 === 0;
+      const isRunnerRound = !isSwarmRound && nextRound % 2 === 0;
+
+      if (isSwarmRound) {
+        mobType = 'swarm';
+        count = Math.floor(baseCount * 2.5);
+        hp = Math.floor(baseHp * 0.4);
+      } else if (isRunnerRound) {
+        mobType = 'runner';
+        count = baseCount;
+        hp = Math.floor(baseHp * 0.6);
+      } else {
+        mobType = 'tank';
+        count = Math.max(2, Math.floor(baseCount * 0.6));
+        hp = Math.floor(baseHp * 2.2);
+      }
+    }
+
+    const element = nextRound >= 3 ? randomElement() : undefined;
+
+    this.broadcast({
+      type: 'NEXT_WAVE_INFO',
+      mobType,
+      element,
+      count,
+      hp,
     });
   }
 
@@ -401,6 +482,9 @@ export class Game {
     const duration = this.state.round === 1 ? FIRST_SHOP_PHASE_DURATION : SHOP_PHASE_DURATION;
     this.state.timer = duration;
 
+    // Feature 2: Broadcast next wave info
+    this.broadcastNextWaveInfo();
+
     // Generate shops and compute upgrade indicators
     this.state.players.filter((p) => p.alive).forEach((p) => {
       p.shop = this.shop.generateShop(p);
@@ -440,6 +524,48 @@ export class Game {
     // Spawn mobs for each alive player
     this.state.players.filter((p) => p.alive).forEach((p) => {
       this.state.mobs[p.id] = this.combat.spawnWave(this.state.round, p);
+    });
+
+    // Feature 4: Spawn PvP units from queue
+    this.state.players.filter(p => p.alive).forEach(p => {
+      const queue = this.pvpQueues.get(p.id) || [];
+      let delay = 1.5; // Start spawning 1.5 seconds after regular wave
+      
+      for (const entry of queue) {
+        const unitDef = PVP_UNIT_DEFS[entry.unitType as keyof typeof PVP_UNIT_DEFS];
+        if (!unitDef) continue;
+        
+        const targetPlayer = this.state.players.find(tp => tp.id === entry.targetPlayerId && tp.alive);
+        if (!targetPlayer) continue;
+        
+        const hp = Math.floor(MOB_BASE_HP * Math.pow(MOB_HP_SCALE, this.state.round - 1) * unitDef.hp_mult);
+        const mapEntry = this.map.entry;
+        
+        const newMob: MobInstance = {
+          instanceId: nanoid(8),
+          defId: entry.unitType.replace('pvp_', ''), // pvp_grunt -> grunt, etc.
+          hp,
+          maxHp: hp,
+          x: mapEntry.col,
+          y: mapEntry.row - delay,
+          pathIndex: 0,
+          effects: [],
+          visible: true,
+          element: this.state.round >= 3 ? randomElement() : undefined,
+          armor: 0,
+        };
+        
+        if (!this.state.mobs[targetPlayer.id]) {
+          this.state.mobs[targetPlayer.id] = [];
+        }
+        this.state.mobs[targetPlayer.id].push(newMob);
+        
+        delay += 0.5; // Stagger PvP units
+      }
+      
+      // Clear queue after spawning
+      this.pvpQueues.set(p.id, []);
+      this.sendTo(p.id, { type: 'PVP_QUEUE_UPDATE', queue: [] });
     });
 
     // PvP monster pits: send mobs to opponents
@@ -639,8 +765,8 @@ export function getGameForPlayer(playerId: string): Game | undefined {
   return playerToGame.get(playerId);
 }
 
-export function createGame(clients: Client[], names: Map<string, string>, config?: GameConfig) {
-  const game = new Game(clients, names, config);
+export function createGame(clients: Client[], names: Map<string, string>, colors: Map<string, PlayerColor>, config?: GameConfig) {
+  const game = new Game(clients, names, colors, config);
   if (clients[0].roomCode) {
     activeGames.set(clients[0].roomCode, game);
   }
@@ -653,6 +779,3 @@ export function createGame(clients: Client[], names: Map<string, string>, config
 
   setTimeout(() => game.start(), 200);
 }
-
-// Import MOB_BASE_HP for PvP calculations
-import { MOB_BASE_HP } from '@ect/shared';

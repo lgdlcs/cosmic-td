@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { socket } from '../network/socket';
-import type { ServerMsg, LobbyPlayer, GameConfig } from '@ect/shared';
-import { DEFAULT_GAME_CONFIG } from '@ect/shared';
+import type { ServerMsg, LobbyPlayer, GameConfig, PlayerColor } from '@ect/shared';
+import { DEFAULT_GAME_CONFIG, PLAYER_COLORS, PLAYER_COLOR_HEX } from '@ect/shared';
 
 const COMMANDER_NAMES = [
   'Orion', 'Nova', 'Vega', 'Cosmo', 'Stellar', 'Nebula', 'Astro', 'Quasar',
@@ -448,8 +448,7 @@ export class LobbyScene extends Phaser.Scene {
       urlEl.textContent = `Share: ${base}?room=${roomCode}`;
     }
 
-    // Player cards
-    const colors = ['#4A90D9', '#D94A4A', '#4AD97A', '#D9A04A'];
+    // Player cards with color pickers (Feature 3)
     // Remove old cards (keep the title)
     while (this.playerList.children.length > 1) this.playerList.removeChild(this.playerList.lastChild!);
 
@@ -457,19 +456,65 @@ export class LobbyScene extends Phaser.Scene {
       const card = document.createElement('div');
       if (i < players.length) {
         const p = players[i];
+        const playerColor = p.color || PLAYER_COLORS[i] as PlayerColor;
+        const colorHex = PLAYER_COLOR_HEX[playerColor];
+        
         card.style.cssText = `
           display: flex; justify-content: space-between; align-items: center;
-          padding: 8px 12px; border-radius: 8px; border-left: 3px solid ${colors[i]};
+          padding: 8px 12px; border-radius: 8px; border-left: 3px solid ${colorHex};
           background: rgba(255,255,255,0.03); animation: fadeSlideIn 0.3s ease;
           animation-delay: ${i * 0.08}s; animation-fill-mode: both;
         `;
+        
+        // Left side: name + color picker
+        const leftDiv = document.createElement('div');
+        leftDiv.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+        
         const name = document.createElement('span');
         name.textContent = p.name;
-        name.style.cssText = `color: ${colors[i]}; font-weight: 600; font-size: 14px;`;
+        name.style.cssText = `color: ${colorHex}; font-weight: 600; font-size: 14px;`;
+        leftDiv.appendChild(name);
+        
+        // Feature 3: Color picker swatches
+        if (p.id === this.myId) {
+          const colorPicker = document.createElement('div');
+          colorPicker.style.cssText = 'display: flex; gap: 3px;';
+          
+          PLAYER_COLORS.forEach((color) => {
+            const swatch = document.createElement('div');
+            const isSelected = playerColor === color;
+            const isAvailable = !players.some(op => op.color === color && op.id !== p.id);
+            const swatchColor = PLAYER_COLOR_HEX[color];
+            
+            swatch.style.cssText = `
+              width: 16px; height: 16px; border-radius: 3px; cursor: pointer;
+              background: ${swatchColor}; border: 2px solid ${isSelected ? '#fff' : 'transparent'};
+              opacity: ${isAvailable ? '1' : '0.3'}; transition: all 0.2s;
+            `;
+            
+            if (isAvailable) {
+              swatch.addEventListener('click', () => {
+                socket.send({ type: 'SET_COLOR', color });
+              });
+              swatch.addEventListener('mouseenter', () => {
+                swatch.style.transform = 'scale(1.2)';
+              });
+              swatch.addEventListener('mouseleave', () => {
+                swatch.style.transform = 'scale(1)';
+              });
+            }
+            
+            colorPicker.appendChild(swatch);
+          });
+          
+          leftDiv.appendChild(colorPicker);
+        }
+        
         const badge = document.createElement('span');
         badge.textContent = p.ready ? '✅ Ready' : '⏳ Waiting';
         badge.style.cssText = `font-size: 12px; color: ${p.ready ? '#00ff88' : '#888'};`;
-        card.appendChild(name);
+        
+        card.appendChild(leftDiv);
         card.appendChild(badge);
       } else {
         card.style.cssText = 'padding: 8px 12px; color: #333; font-size: 13px;';

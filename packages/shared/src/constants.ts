@@ -85,3 +85,11 @@ export const KILL_REWARD_TIERS = [
   { maxRound: 15, gold: 1 },
   { maxRound: 30, gold: 2 },
 ];
+
+// ── PvP Units (Feature 4) ───────────────────────────────
+
+export const PVP_UNIT_DEFS = {
+  pvp_grunt: { id: 'pvp_grunt', cost: 5, hp_mult: 1.0 },
+  pvp_runner: { id: 'pvp_runner', cost: 8, hp_mult: 0.6, speed_mult: 1.8 },
+  pvp_tank: { id: 'pvp_tank', cost: 12, hp_mult: 2.2, speed_mult: 0.5 },
+} as const;
