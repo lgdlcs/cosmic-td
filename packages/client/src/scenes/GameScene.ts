@@ -89,9 +89,9 @@ class SoundFX {
 const sfx = new SoundFX();
 
 const FONT = "'Chakra Petch', 'Segoe UI', system-ui, sans-serif";
-const CELL = 32;
-const GRID_X = 224;
-const GRID_Y = 80;
+const CELL = 36;
+const GRID_X = 300;
+const GRID_Y = 60;
 const GRID_PX = CELL * GRID_SIZE;
 
 // Tower shop display colors (Feature 2)
@@ -1122,11 +1122,19 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      // canUpgrade indicator: green pulsing border
+      // canUpgrade indicator: bright green pulsing glow + arrow
       if (tower.canUpgrade) {
-        const pulse = 0.4 + 0.4 * Math.sin(Date.now() / 300);
-        this.towerGfx.lineStyle(2, 0x44ff44, pulse);
-        this.towerGfx.strokeCircle(cx, cy, size + 6);
+        const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 250);
+        // Outer glow
+        this.towerGfx.lineStyle(3, 0x44ff44, pulse);
+        this.towerGfx.strokeCircle(cx, cy, size + 7);
+        // Inner glow
+        this.towerGfx.fillStyle(0x44ff44, pulse * 0.15);
+        this.towerGfx.fillCircle(cx, cy, size + 7);
+        // Up arrow above tower
+        const arrowY = cy - size - 10 - Math.sin(Date.now() / 400) * 3;
+        this.towerGfx.fillStyle(0x44ff44, pulse);
+        this.towerGfx.fillTriangle(cx, arrowY - 6, cx - 5, arrowY + 2, cx + 5, arrowY + 2);
       }
 
       // Feature 5: Selected tower highlight
@@ -1215,7 +1223,7 @@ export class GameScene extends Phaser.Scene {
     if (!container) return;
     container.style.position = 'relative';
 
-    const W = 960, H = 720;
+    const W = 1280, H = 800;
     const pct = (gx: number, gy: number) => ({ left: `${(gx / W * 100).toFixed(2)}%`, top: `${(gy / H * 100).toFixed(2)}%` });
 
     // Root overlay
@@ -1524,16 +1532,23 @@ export class GameScene extends Phaser.Scene {
           const color = SHOP_TOWER_COLORS[def.towerType] || '#888';
           const textColor = isSelected ? '#ffc107' : color;
           const bgColor = isSelected ? 'rgba(42,42,10,0.9)' : enablesUpgrade ? 'rgba(26,42,26,0.9)' : 'rgba(13,17,23,0.9)';
-          slot.innerHTML = `<span style="color:${color}">■</span> ${def.name}<br><span style="color:#ffc107">${def.cost}g</span>`;
+          const canAfford = me.gold >= def.cost;
+          slot.innerHTML = `<span style="color:${color}">■</span> ${def.name}<br><span style="color:${canAfford ? '#ffc107' : '#ff4444'}">${def.cost}g</span>`;
           slot.style.color = textColor;
+          slot.style.opacity = canAfford ? '1' : '0.4';
           slot.style.background = bgColor;
           slot.style.borderColor = enablesUpgrade ? '#44ff44' : isSelected ? '#ffc107' : 'rgba(0,212,255,0.3)';
+          slot.style.borderWidth = enablesUpgrade ? '2px' : '1px';
+          slot.style.boxShadow = enablesUpgrade ? '0 0 8px #44ff4466' : 'none';
         }
       } else {
         slot.innerHTML = '<span style="color:#444">— empty —</span>';
         slot.style.color = '#444';
+        slot.style.opacity = '1';
         slot.style.background = 'rgba(13,17,23,0.9)';
         slot.style.borderColor = 'rgba(0,212,255,0.3)';
+        slot.style.borderWidth = '1px';
+        slot.style.boxShadow = 'none';
       }
     }
 
