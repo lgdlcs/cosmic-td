@@ -751,10 +751,15 @@ export class GameScene extends Phaser.Scene {
             const combo = COMBO_MAP[meForCombo.activeCombo];
             if (combo) info += `Combo: ${combo.name}\n`;
           }
-          if (stats.damage > 0) info += `DMG: ${stats.damage}  ATK SPD: ${stats.attackSpeed}/s  RANGE: ${stats.range}\n`;
+          if (def.towerType === 'pvp') {
+            info += `⚠ Does NOT attack — generates PvP points\n`;
+            info += `+${tower.stars} pts/round\n`;
+          } else if (stats.damage > 0) {
+            info += `DMG: ${stats.damage}  ATK SPD: ${stats.attackSpeed}/s  RANGE: ${stats.range}\n`;
+          } else if (def.towerType === 'income') {
+            info += `⚠ Needs an element to attack\n`;
+          }
           if (stats.splashRadius) info += `Splash: ${stats.splashRadius}\n`;
-          if (stats.incomePerRound) info += `Income: +${stats.incomePerRound}g/round\n`;
-          if (stats.mobPower) info += `PvP Power: ${stats.mobPower}\n`;
 
           {
             if (tower.canUpgrade) {
