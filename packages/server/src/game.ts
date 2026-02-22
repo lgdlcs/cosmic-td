@@ -173,7 +173,9 @@ export class Game {
       case 'REROLL': {
         
         if (this.shop.reroll(player)) {
+          this.shop.updateCanUpgrade(player);
           this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
+          this.broadcastStateUpdate();
         }
         break;
       }
