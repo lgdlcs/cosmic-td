@@ -1,9 +1,21 @@
+import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { handleMessage } from './lobby.js';
 
 const PORT = Number(process.env.PORT) || 3001;
 
-const wss = new WebSocketServer({ port: PORT });
+// HTTP server for health checks (Fly.io)
+const server = createServer((req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', game: 'Cosmic TD' }));
+  } else {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('🚀 Cosmic TD Server');
+  }
+});
+
+const wss = new WebSocketServer({ server });
 
 export interface Client {
   ws: WebSocket;
@@ -34,8 +46,9 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     console.log(`[disconnect] ${client.id}`);
     clients.delete(ws);
-    // Lobby cleanup is handled when they rejoin
   });
 });
 
-console.log(`🚀 Cosmic TD server on ws://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Cosmic TD server on 0.0.0.0:${PORT}`);
+});

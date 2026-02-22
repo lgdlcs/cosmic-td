@@ -11,11 +11,17 @@ class GameSocket {
   constructor() {
     const host = window.location.hostname || 'localhost';
     const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    // In dev, Vite runs on 5173 but WS is on 3001
-    // In prod, both are on the same port
     const isDev = port === '5173';
-    this.url = isDev ? `ws://${host}:3001` : `${protocol}://${host}:${port}`;
+    const isGitHubPages = host.includes('github.io');
+
+    if (isDev) {
+      this.url = `ws://${host}:3001`;
+    } else if (isGitHubPages) {
+      this.url = 'wss://cosmic-td-server.fly.dev';
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      this.url = `${protocol}://${host}:${port}`;
+    }
   }
 
   isConnected(): boolean {
