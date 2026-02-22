@@ -931,9 +931,16 @@ export class GameScene extends Phaser.Scene {
       else if (mob.defId === 'runner') { radius = 5; borderColor = 0x66ff66; shape = 'diamond'; }
       else if (mob.defId === 'swarm') { radius = 4; borderColor = 0x66ccff; }
 
-      const r = Math.floor(255 * (1 - hpRatio));
-      const gr = Math.floor(200 * hpRatio + 55);
-      const bodyColor = Phaser.Display.Color.GetColor(r, gr, 50);
+      // PvP mobs: purple tint + flying = triangle pointing up
+      const isPvp = (mob as any).isPvp;
+      const isFlying = (mob as any).isFlying;
+      if (isPvp) borderColor = 0x9B5DE5;
+      if (isFlying) shape = 'diamond'; // triangle shape for flyers
+
+      const r = isPvp ? 155 : Math.floor(255 * (1 - hpRatio));
+      const gr = isPvp ? 93 : Math.floor(200 * hpRatio + 55);
+      const b = isPvp ? 229 : 50;
+      const bodyColor = Phaser.Display.Color.GetColor(r, gr, b);
 
       this.mobGfx.fillStyle(0x000000, alpha * 0.3);
       this.mobGfx.fillEllipse(x + 2, y + radius + 2, radius * 1.6, radius * 0.5);
@@ -1388,23 +1395,32 @@ export class GameScene extends Phaser.Scene {
 
     const title = document.createElement('div');
     Object.assign(title.style, { fontSize: '14px', color: '#7b2fbe', fontWeight: '700', textAlign: 'center', marginBottom: '6px' });
-    title.textContent = 'PVP SEND';
+    title.textContent = 'WARP GATE';
     panel.appendChild(title);
 
-    const unitTypes = ['pvp_grunt', 'pvp_runner', 'pvp_tank'];
-    const unitNames = ['Grunt', 'Runner', 'Tank'];
-    const unitCosts = [5, 8, 12];
+    // PvP Points display
+    const pointsDisplay = document.createElement('div');
+    Object.assign(pointsDisplay.style, { fontSize: '12px', color: '#9B5DE5', textAlign: 'center', marginBottom: '8px' });
+    pointsDisplay.textContent = '⚡ 0 pts';
+    panel.appendChild(pointsDisplay);
+    (panel as any)._pointsDisplay = pointsDisplay;
+
+    const unitTypes = ['basic', 'flying', 'boss'];
+    const unitNames = ['Send Unit', 'Send Flyer', 'Send Boss'];
+    const unitCosts = [3, 8, 10];
+    const unitDescs = ['Round type ×1.5 HP', 'Ignores path, fast', 'Massive HP ×5'];
 
     unitTypes.forEach((unitType, i) => {
       const btn = document.createElement('div');
       Object.assign(btn.style, {
         fontSize: '11px', color: '#e0e8ff', background: '#7b2fbe',
-        padding: '3px 6px', marginBottom: '4px', borderRadius: '4px',
-        cursor: 'pointer', pointerEvents: 'auto',
+        padding: '4px 6px', marginBottom: '4px', borderRadius: '4px',
+        cursor: 'pointer', pointerEvents: 'auto', lineHeight: '1.3',
       });
-      btn.textContent = `${unitNames[i]} (${unitCosts[i]}g)`;
+      btn.innerHTML = `${unitNames[i]} <span style="color:#ffc107">(${unitCosts[i]}pts)</span><br><span style="font-size:9px;color:#aaa">${unitDescs[i]}</span>`;
       btn.onclick = () => this.queuePvPUnit(unitType);
       panel.appendChild(btn);
+      (panel as any)[`_pvpBtn${i}`] = btn;
     });
 
     const targetRow = document.createElement('div');
@@ -1489,7 +1505,7 @@ export class GameScene extends Phaser.Scene {
     const me = this.me();
     if (!me) return;
 
-    if (this.hudLeft) this.hudLeft.textContent = `❤️ ${me.hp}   💰 ${me.gold}`;
+    if (this.hudLeft) this.hudLeft.textContent = `❤️ ${me.hp}   💰 ${me.gold}   ⚡ ${me.pvpPoints || 0}`;
     this.updatePhaseText();
 
     // Shop slots (DOM)
@@ -1872,6 +1888,21 @@ export class GameScene extends Phaser.Scene {
   private updatePvPPanel() {
     if (!this.domPvPPanel) return;
     
+    const me = this.me();
+    const pts = me?.pvpPoints || 0;
+    const pointsDisplay = (this.domPvPPanel as any)._pointsDisplay as HTMLDivElement | undefined;
+    if (pointsDisplay) pointsDisplay.textContent = `⚡ ${pts} pts`;
+
+    // Grey out buttons player can't afford
+    const costs = [3, 8, 10];
+    costs.forEach((cost, i) => {
+      const btn = (this.domPvPPanel as any)[`_pvpBtn${i}`] as HTMLDivElement | undefined;
+      if (btn) {
+        btn.style.opacity = pts >= cost ? '1' : '0.4';
+        btn.style.pointerEvents = pts >= cost ? 'auto' : 'none';
+      }
+    });
+
     const targetBtn = (this.domPvPPanel as any)._targetBtn as HTMLSpanElement | undefined;
     const queueLabel = (this.domPvPPanel as any)._queueLabel as HTMLDivElement | undefined;
     if (!targetBtn || !queueLabel) return;
