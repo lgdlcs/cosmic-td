@@ -16,11 +16,9 @@ class GameSocket {
 
     if (isDev) {
       this.url = `ws://${host}:3001`;
-    } else if (isGitHubPages) {
-      this.url = 'wss://cosmic-td-server.fly.dev';
     } else {
-      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      this.url = `${protocol}://${host}:${port}`;
+      // Always connect to the dedicated WS server
+      this.url = 'wss://cosmic-td-server.fly.dev';
     }
   }
 
