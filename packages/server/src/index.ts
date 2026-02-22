@@ -1,6 +1,6 @@
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { handleMessage } from './lobby.js';
+import { handleMessage, handleDisconnect } from './lobby.js';
 
 const PORT = Number(process.env.PORT) || 3001;
 
@@ -45,6 +45,7 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     console.log(`[disconnect] ${client.id}`);
+    handleDisconnect(client);
     clients.delete(ws);
   });
 });

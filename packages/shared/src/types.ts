@@ -166,7 +166,8 @@ export type ServerMsg =
   | { type: 'ERROR'; message: string }
   | { type: 'NEXT_WAVE_INFO'; mobType: string; element?: Element; count: number; hp: number } // Feature 2: Next wave info
   | { type: 'PVP_QUEUE_UPDATE'; queue: PvPQueueEntry[] } // Feature 4: PvP queue update
-  | { type: 'ELEMENT_APPLIED'; playerId: string; towerId: string; element?: Element; comboId?: string };
+  | { type: 'ELEMENT_APPLIED'; playerId: string; towerId: string; element?: Element; comboId?: string }
+  | { type: 'FIRST_CLEAR'; playerId: string; bonus: number };
 
 export interface CombatAttack {
   towerX: number;

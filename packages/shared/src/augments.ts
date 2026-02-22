@@ -176,9 +176,9 @@ export function getAugmentTier(round: number): 1 | 2 | 3 {
   return 1;
 }
 
-/** Check if a round should offer augments */
+/** Check if a round should offer augments (after boss rounds: 5,10,15,20,25,30) */
 export function isAugmentRound(round: number): boolean {
-  return round >= 3 && round % 3 === 0;
+  return round > 1 && round % 5 === 1; // rounds 6, 11, 16, 21, 26
 }
 
 /** Get 3 random augments of appropriate tier, always including at least 1 element */

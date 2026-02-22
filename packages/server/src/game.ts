@@ -59,6 +59,7 @@ export class Game {
   tickCount = 0;
   roundLeaks: Map<string, number> = new Map();
   firstKillClaimed: boolean = false;
+  firstClearClaimed: boolean = false;
   speed: number = 1;
   config: GameConfig;
   /** Track which players have picked augments this round */
@@ -234,7 +235,13 @@ export class Game {
         const tower = player.towers.find(t => t.instanceId === msg.towerId);
         if (!tower) return;
         const towerDef = TOWER_MAP[tower.defId];
-        if (!towerDef || (towerDef.towerType !== 'arrow' && towerDef.towerType !== 'cannon')) return;
+        if (!towerDef || towerDef.towerType === 'pvp') return;
+
+        // Changing element costs 2g (first application is free, removing is free)
+        const ELEMENT_CHANGE_COST = 2;
+        const isChanging = tower.element && (msg.element || msg.comboId);
+        if (isChanging && player.gold < ELEMENT_CHANGE_COST) return;
+        if (isChanging) player.gold -= ELEMENT_CHANGE_COST;
 
         if (msg.comboId) {
           // Applying a combo
@@ -628,6 +635,7 @@ export class Game {
 
     this.roundLeaks.clear();
     this.firstKillClaimed = false;
+    this.firstClearClaimed = false;
     this.state.players.filter((p) => p.alive).forEach((p) => {
       this.roundLeaks.set(p.id, 0);
     });
@@ -649,14 +657,8 @@ export class Game {
     this.state.players.filter((p) => p.alive).forEach((p) => {
       const result = this.combat.tick(p, this.state.mobs[p.id], TICK_MS);
 
-      let gotFirstKill = false;
       result.killed.forEach(() => {
-        // First kill of the round across ALL players = +2g
-        if (!this.firstKillClaimed) {
-          this.firstKillClaimed = true;
-          gotFirstKill = true;
-          p.gold += 2;
-        }
+        // No kill rewards — income comes from round income
       });
 
       result.leaked.forEach((mob) => {
@@ -688,20 +690,27 @@ export class Game {
             element: a.element,
             splash: a.splash,
           })),
-          kills: result.killed.map((m, i) => ({
+          kills: result.killed.map((m) => ({
             mobId: m.instanceId,
             x: m.x,
             y: m.y,
-            gold: (i === 0 && gotFirstKill) ? 2 : 0,
+            gold: 0,
           })),
           leaks: result.leaked.map((m) => m.instanceId),
         });
       }
 
       this.state.mobs[p.id] = result.remaining;
+
+      // First player to clear all mobs gets +3g bonus
+      if (result.remaining.length === 0 && !this.firstClearClaimed && this.state.phase === 'combat') {
+        this.firstClearClaimed = true;
+        p.gold += 3;
+        this.broadcast({ type: 'FIRST_CLEAR', playerId: p.id, bonus: 3 });
+      }
     });
 
-    if (this.tickCount % MOB_SYNC_INTERVAL === 0) {
+    if (this.tickCount % MOB_SYNC_INTERVAL === 0)
       this.broadcast({ type: 'MOB_SYNC', mobs: this.state.mobs });
     }
 

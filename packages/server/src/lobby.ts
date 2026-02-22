@@ -79,6 +79,27 @@ function broadcastLobby(room: Room) {
   });
 }
 
+export function handleDisconnect(client: Client) {
+  // If in a started game, kill the player
+  const game = getGameForPlayer(client.id);
+  if (game) {
+    const player = game.state.players.find(p => p.id === client.id);
+    if (player && player.alive) {
+      player.hp = 0;
+      player.alive = false;
+      game.broadcast({ type: 'STATE_UPDATE', state: game.state });
+      console.log(`[disconnect] Killed player ${client.id} in game`);
+    }
+  }
+  // Clean up from lobby rooms
+  cleanupPlayerFromRooms(client);
+  // Broadcast lobby update if room still exists
+  if (client.roomCode) {
+    const room = rooms.get(client.roomCode);
+    if (room && !room.started) broadcastLobby(room);
+  }
+}
+
 export function handleMessage(client: Client, msg: ClientMsg) {
   switch (msg.type) {
     case 'JOIN_LOBBY': {

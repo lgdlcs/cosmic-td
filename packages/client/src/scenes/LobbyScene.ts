@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import { socket } from '../network/socket';
 import type { ServerMsg, LobbyPlayer, GameConfig, PlayerColor } from '@ect/shared';
+
+const FONT = "'Chakra Petch', 'Segoe UI', system-ui, sans-serif";
 import { DEFAULT_GAME_CONFIG, PLAYER_COLORS, PLAYER_COLOR_HEX } from '@ect/shared';
 
 const COMMANDER_NAMES = [

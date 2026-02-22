@@ -88,6 +88,7 @@ class SoundFX {
 
 const sfx = new SoundFX();
 
+const FONT = "'Chakra Petch', 'Segoe UI', system-ui, sans-serif";
 const CELL = 32;
 const GRID_X = 224;
 const GRID_Y = 80;
@@ -436,6 +437,13 @@ export class GameScene extends Phaser.Scene {
         }
         break;
 
+      case 'FIRST_CLEAR':
+        if (msg.playerId === this.myId) {
+          this.spawnFloatingText(480, 360, `⚡ FIRST CLEAR +${msg.bonus}g!`, -40);
+          sfx.goldReceived();
+        }
+        break;
+
       case 'SPEED_CHANGE':
         this.currentSpeed = msg.speed;
         this.updateSpeedButtons();
@@ -477,14 +485,14 @@ export class GameScene extends Phaser.Scene {
     
     // Title
     const title = this.add.text(cx, cy - 180, `🔬 CHOOSE YOUR TECHNOLOGY — Round ${this.gameState.round}`, {
-      fontSize: '24px', color: '#FFD93D', fontStyle: 'bold',
+      fontFamily: FONT, fontSize: '24px', color: '#FFD93D', fontStyle: 'bold',
       stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5);
     this.augmentOverlay.add(title);
     
     // Timer
     const timerText = this.add.text(cx, cy - 150, `⏱ ${this.localTimer}s`, {
-      fontSize: '16px', color: '#aaa',
+      fontFamily: FONT, fontSize: '16px', color: '#aaa',
     }).setOrigin(0.5);
     this.augmentOverlay.add(timerText);
     
@@ -516,26 +524,26 @@ export class GameScene extends Phaser.Scene {
       
       // Tier label
       const tier = this.add.text(cardX, cardY - cardH / 2 + 20, tierLabels[aug.tier] || '', {
-        fontSize: '11px', color: '#aaa', fontStyle: 'bold',
+        fontFamily: FONT, fontSize: '11px', color: '#aaa', fontStyle: 'bold',
       }).setOrigin(0.5);
       this.augmentOverlay!.add(tier);
       
       // Icon
       const icon = this.add.text(cardX, cardY - 40, aug.icon, {
-        fontSize: '48px',
+        fontFamily: FONT, fontSize: '48px',
       }).setOrigin(0.5);
       this.augmentOverlay!.add(icon);
       
       // Name
       const name = this.add.text(cardX, cardY + 20, aug.name, {
-        fontSize: '16px', color: '#ffffff', fontStyle: 'bold',
+        fontFamily: FONT, fontSize: '16px', color: '#ffffff', fontStyle: 'bold',
         align: 'center',
       }).setOrigin(0.5);
       this.augmentOverlay!.add(name);
       
       // Description
       const desc = this.add.text(cardX, cardY + 55, aug.description, {
-        fontSize: '12px', color: '#cccccc',
+        fontFamily: FONT, fontSize: '12px', color: '#cccccc',
         align: 'center',
         wordWrap: { width: cardW - 20 },
       }).setOrigin(0.5);
@@ -885,10 +893,10 @@ export class GameScene extends Phaser.Scene {
     const entry = this.mapDef.entry;
     const exit = this.mapDef.exit;
     this.add.text(GRID_X + entry.col * CELL + 8, GRID_Y + entry.row * CELL + 22, '▶ IN', {
-      fontSize: '12px', color: '#00ff88', fontStyle: 'bold',
+      fontFamily: FONT, fontSize: '12px', color: '#00ff88', fontStyle: 'bold',
     }).setDepth(0);
     this.add.text(GRID_X + exit.col * CELL + 4, GRID_Y + exit.row * CELL + 22, '✕ EXIT', {
-      fontSize: '11px', color: '#ff4444', fontStyle: 'bold',
+      fontFamily: FONT, fontSize: '11px', color: '#ff4444', fontStyle: 'bold',
     }).setDepth(0);
   }
 
@@ -1139,7 +1147,7 @@ export class GameScene extends Phaser.Scene {
     const cx = GRID_X + GRID_PX / 2;
     const cy = GRID_Y + GRID_PX / 2;
     const flash = this.add.text(cx, cy, text, {
-      fontSize: '40px', color: '#00d4ff', fontStyle: 'bold',
+      fontFamily: FONT, fontSize: '40px', color: '#00d4ff', fontStyle: 'bold',
       stroke: '#7b2fbe', strokeThickness: 4,
     }).setOrigin(0.5).setDepth(10).setAlpha(1);
 
@@ -1175,7 +1183,7 @@ export class GameScene extends Phaser.Scene {
 
     // Mute button
     const muteBtn = this.add.text(GRID_X + GRID_PX, 8, sfx.muted ? '🔇' : '🔊', {
-      fontSize: '20px',
+      fontFamily: FONT, fontSize: '20px',
     }).setOrigin(1, 0).setDepth(5).setInteractive({ useHandCursor: true });
     muteBtn.on('pointerdown', () => {
       const muted = sfx.toggle();
@@ -1184,14 +1192,14 @@ export class GameScene extends Phaser.Scene {
 
     // Mob count
     this.uiMobCount = this.add.text(GRID_X + GRID_PX, 30, '', {
-      fontSize: '12px', color: '#888',
+      fontFamily: FONT, fontSize: '12px', color: '#888',
     }).setOrigin(1, 0).setDepth(5);
 
     // Opponents (left sidebar)
     for (let i = 0; i < 3; i++) {
       this.uiOpponents.push(
         this.add.text(10, GRID_Y + i * 70, '', {
-          fontSize: '13px', color: '#e0e8ff',
+          fontFamily: FONT, fontSize: '13px', color: '#e0e8ff',
           backgroundColor: '#0d1117cc',
           padding: { x: 8, y: 6 },
           fixedWidth: 185,
@@ -1202,7 +1210,7 @@ export class GameScene extends Phaser.Scene {
 
     // Augment list (right sidebar)
     this.uiAugmentList = this.add.text(GRID_X + GRID_PX + 10, GRID_Y, '', {
-      fontSize: '12px', color: '#e0e8ff',
+      fontFamily: FONT, fontSize: '12px', color: '#e0e8ff',
       backgroundColor: '#0d1117cc',
       padding: { x: 8, y: 6 },
       wordWrap: { width: 170 },
@@ -1211,7 +1219,7 @@ export class GameScene extends Phaser.Scene {
 
     // Shop with keybind hints (Feature 1)
     this.add.text(GRID_X, shopY - 2, 'SPACE STATION — Buy 3 of same type → ★ upgrade', {
-      fontSize: '11px', color: '#666', fontStyle: 'bold',
+      fontFamily: FONT, fontSize: '11px', color: '#666', fontStyle: 'bold',
     }).setDepth(5);
 
     for (let i = 0; i < 5; i++) {
@@ -1219,11 +1227,11 @@ export class GameScene extends Phaser.Scene {
       
       // Feature 1: Add keybind hint above slot
       this.add.text(x + 49, shopY + 3, `[${i + 1}]`, {
-        fontSize: '10px', color: '#666', fontStyle: 'bold',
+        fontFamily: FONT, fontSize: '10px', color: '#666', fontStyle: 'bold',
       }).setOrigin(0.5, 0).setDepth(5);
       
       const txt = this.add.text(x, shopY + 14, '', {
-        fontSize: '12px', color: '#e0e8ff',
+        fontFamily: FONT, fontSize: '12px', color: '#e0e8ff',
         backgroundColor: '#0d1117cc',
         padding: { x: 6, y: 5 },
         fixedWidth: 98,
@@ -1238,19 +1246,19 @@ export class GameScene extends Phaser.Scene {
     // Buttons with keybind hints (Feature 1)
     const btnX = GRID_X + 5 * 104 + 8;
     this.add.text(btnX, shopY + 14, '🔄 [D] Reroll 2g', {
-      fontSize: '13px', color: '#0a0a14', backgroundColor: '#ffc107',
+      fontFamily: FONT, fontSize: '13px', color: '#0a0a14', backgroundColor: '#ffc107',
       padding: { x: 8, y: 8 },
     }).setDepth(5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => socket.send({ type: 'REROLL' }));
 
     this.add.text(btnX, shopY + 52, 'TECH TREE', {
-      fontSize: '13px', color: '#e0e8ff', backgroundColor: '#7b2fbe',
+      fontFamily: FONT, fontSize: '13px', color: '#e0e8ff', backgroundColor: '#7b2fbe',
       padding: { x: 8, y: 8 },
     }).setDepth(5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => this.showTechTree());
 
     this.add.text(btnX, shopY + 86, '▶ [Space] Send Wave', {
-      fontSize: '13px', color: '#e0e8ff', backgroundColor: '#ff4444',
+      fontFamily: FONT, fontSize: '13px', color: '#e0e8ff', backgroundColor: '#ff4444',
       padding: { x: 8, y: 8 },
     }).setDepth(5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => socket.send({ type: 'DEV_START_COMBAT' }));
@@ -1262,7 +1270,7 @@ export class GameScene extends Phaser.Scene {
     const speedStartX = GRID_X + GRID_PX - speeds.length * 34;
     speeds.forEach((s, i) => {
       const btn = this.add.text(speedStartX + i * 34, speedY, `×${s}`, {
-        fontSize: '12px',
+        fontFamily: FONT, fontSize: '12px',
         color: s === 1 ? '#0a0a14' : '#7a8aaa',
         backgroundColor: s === 1 ? '#00d4ff' : '#12122a',
         padding: { x: 5, y: 4 },
@@ -1273,7 +1281,7 @@ export class GameScene extends Phaser.Scene {
 
     // Shop instruction with keybind hints (Feature 1 & 5)
     this.add.text(GRID_X, shopY + 80, '[1-5] Select shop | Click grid to place | Click tower for menu | [E] to sell selected', {
-      fontSize: '11px', color: '#666', fontStyle: 'bold',
+      fontFamily: FONT, fontSize: '11px', color: '#666', fontStyle: 'bold',
     }).setDepth(5);
 
     // Feature 4: Create PvP panel
@@ -1281,7 +1289,7 @@ export class GameScene extends Phaser.Scene {
 
     // Tower hover tooltip
     this.uiTowerHoverInfo = this.add.text(0, 0, '', {
-      fontSize: '12px', color: '#ffffff',
+      fontFamily: FONT, fontSize: '12px', color: '#ffffff',
       backgroundColor: '#0d1117cc',
       padding: { x: 8, y: 6 },
       stroke: '#00d4ff', strokeThickness: 1,
@@ -1299,7 +1307,7 @@ export class GameScene extends Phaser.Scene {
       display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap',
       gap: '4px 16px', padding: '8px 12px', width: '100%',
       zIndex: '10', pointerEvents: 'none',
-      fontFamily: 'monospace', color: '#e0e8ff', fontSize: '14px',
+      fontFamily: FONT, color: '#e0e8ff', fontSize: '14px',
       background: 'rgba(10,10,20,0.8)',
     });
     const left = document.createElement('span');
@@ -1555,7 +1563,7 @@ export class GameScene extends Phaser.Scene {
     const copies = tower.stars >= 3 ? 9 : tower.stars >= 2 ? 3 : 1;
     const sellPrice = Math.floor(def.cost * copies * 0.7);
     const canUpgrade = tower.canUpgrade;
-    const canApplyElement = def.towerType === 'arrow' || def.towerType === 'cannon';
+    const canApplyElement = def.towerType !== 'pvp'; // all towers except Warp Gate
     
     // Collect unlocked combos
     const unlockedCombos: ElementCombo[] = [];
@@ -1587,7 +1595,7 @@ export class GameScene extends Phaser.Scene {
     const row1Y = panelY - panelH / 2 + 18;
     
     const sellBtn = this.add.text(panelX - panelW / 2 + 8, row1Y, `SELL ${sellPrice}g`, {
-      fontSize: '11px', color: '#fff', backgroundColor: '#cc3333',
+      fontFamily: FONT, fontSize: '11px', color: '#fff', backgroundColor: '#cc3333',
       padding: { x: 6, y: 4 }, fontStyle: 'bold',
     }).setOrigin(0, 0.5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => {
@@ -1601,7 +1609,7 @@ export class GameScene extends Phaser.Scene {
     const upColor = canUpgrade ? '#33aa33' : '#333344';
     const upTextColor = canUpgrade ? '#fff' : '#666';
     const upgradeBtn = this.add.text(panelX + 20, row1Y, '★ UP', {
-      fontSize: '11px', color: upTextColor, backgroundColor: upColor,
+      fontFamily: FONT, fontSize: '11px', color: upTextColor, backgroundColor: upColor,
       padding: { x: 6, y: 4 }, fontStyle: 'bold',
     }).setOrigin(0, 0.5);
     if (canUpgrade) {
@@ -1635,7 +1643,7 @@ export class GameScene extends Phaser.Scene {
         });
       this.towerActionMenu.add(neutralBtn);
       const neutralLabel = this.add.text(
-        neutralBtn.x, neutralBtn.y, '✕', { fontSize: '12px', color: '#aaa' }
+        neutralBtn.x, neutralBtn.y, '✕', { fontFamily: FONT, fontSize: '12px', color: '#aaa' }
       ).setOrigin(0.5);
       this.towerActionMenu.add(neutralLabel);
       btnIdx++;
@@ -1658,7 +1666,7 @@ export class GameScene extends Phaser.Scene {
         this.towerActionMenu.add(btn);
         
         const emoji = ELEMENT_EMOJI[elem] || '?';
-        const label = this.add.text(bx, by, emoji, { fontSize: '11px' }).setOrigin(0.5);
+        const label = this.add.text(bx, by, emoji, { fontFamily: FONT, fontSize: '11px' }).setOrigin(0.5);
         this.towerActionMenu.add(label);
         btnIdx++;
       }
@@ -1680,7 +1688,7 @@ export class GameScene extends Phaser.Scene {
         this.towerActionMenu.add(btn);
         
         const label = this.add.text(bx, by, combo.name.slice(0, 2), {
-          fontSize: '8px', color: '#fff', fontStyle: 'bold',
+          fontFamily: FONT, fontSize: '8px', color: '#fff', fontStyle: 'bold',
         }).setOrigin(0.5);
         this.towerActionMenu.add(label);
         btnIdx++;
@@ -1710,7 +1718,7 @@ export class GameScene extends Phaser.Scene {
     
     // Title
     const title = this.add.text(panelX + 100, panelY + 10, 'PVP SEND', {
-      fontSize: '14px', color: '#7b2fbe', fontStyle: 'bold',
+      fontFamily: FONT, fontSize: '14px', color: '#7b2fbe', fontStyle: 'bold',
     }).setOrigin(0.5, 0);
     this.pvpPanel!.add(title);
     
@@ -1722,7 +1730,7 @@ export class GameScene extends Phaser.Scene {
     unitTypes.forEach((unitType, i) => {
       const btnY = panelY + 35 + i * 25;
       const btn = this.add.text(panelX + 20, btnY, `${unitNames[i]} (${unitCosts[i]}g)`, {
-        fontSize: '11px', color: '#e0e8ff', backgroundColor: '#7b2fbe',
+        fontFamily: FONT, fontSize: '11px', color: '#e0e8ff', backgroundColor: '#7b2fbe',
         padding: { x: 4, y: 3 },
       }).setInteractive({ useHandCursor: true })
         .on('pointerdown', () => this.queuePvPUnit(unitType));
@@ -1731,12 +1739,12 @@ export class GameScene extends Phaser.Scene {
     
     // Target selector
     const targetLabel = this.add.text(panelX + 20, panelY + 120, 'Target:', {
-      fontSize: '11px', color: '#aaa',
+      fontFamily: FONT, fontSize: '11px', color: '#aaa',
     });
     this.pvpPanel!.add(targetLabel);
     
     const targetBtn = this.add.text(panelX + 60, panelY + 120, 'Click to cycle', {
-      fontSize: '11px', color: '#00d4ff', backgroundColor: '#0d1117',
+      fontFamily: FONT, fontSize: '11px', color: '#00d4ff', backgroundColor: '#0d1117',
       padding: { x: 4, y: 2 },
     }).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => this.cycleTarget());
@@ -1744,7 +1752,7 @@ export class GameScene extends Phaser.Scene {
     
     // Queue display area
     const queueLabel = this.add.text(panelX + 20, panelY + 145, 'Queue: (empty)', {
-      fontSize: '10px', color: '#666',
+      fontFamily: FONT, fontSize: '10px', color: '#666',
     });
     this.pvpPanel!.add(queueLabel);
     
@@ -1816,7 +1824,7 @@ export class GameScene extends Phaser.Scene {
 
     // Text
     const text = this.add.text(x, y - 25, label, {
-      fontSize: '18px', color, fontStyle: 'bold',
+      fontFamily: FONT, fontSize: '18px', color, fontStyle: 'bold',
       stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5).setDepth(25);
     this.tweens.add({
@@ -1854,7 +1862,7 @@ export class GameScene extends Phaser.Scene {
     const cy = GRID_Y + GRID_PX / 2;
     
     const text = this.add.text(cx, cy, `${comboName.toUpperCase()} UNLOCKED!`, {
-      fontSize: '32px', color: comboColor, fontStyle: 'bold',
+      fontFamily: FONT, fontSize: '32px', color: comboColor, fontStyle: 'bold',
       stroke: '#000', strokeThickness: 4,
     }).setOrigin(0.5).setDepth(25).setAlpha(0);
 
@@ -1888,14 +1896,14 @@ export class GameScene extends Phaser.Scene {
     
     // Title
     const title = this.add.text(cx, cy - 230, 'ELEMENT COMBO TECH TREE', {
-      fontSize: '22px', color: '#FFD93D', fontStyle: 'bold',
+      fontFamily: FONT, fontSize: '22px', color: '#FFD93D', fontStyle: 'bold',
       stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5);
     this.techTreeOverlay.add(title);
 
     // Close button
     const closeBtn = this.add.text(cx + 280, cy - 230, '✕', {
-      fontSize: '20px', color: '#ff4444',
+      fontFamily: FONT, fontSize: '20px', color: '#ff4444',
     }).setOrigin(0.5).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => this.hideTechTree());
     this.techTreeOverlay.add(closeBtn);
@@ -1932,13 +1940,13 @@ export class GameScene extends Phaser.Scene {
       const e1 = ELEMENT_EMOJI[combo.elements[0]] || '?';
       const e2 = ELEMENT_EMOJI[combo.elements[1]] || '?';
       const elemText = this.add.text(cardX, cardY - 12, `${e1}+${e2}`, {
-        fontSize: '11px', color: '#ffffff',
+        fontFamily: FONT, fontSize: '11px', color: '#ffffff',
       }).setOrigin(0.5).setAlpha(alpha);
       this.techTreeOverlay!.add(elemText);
       
       // Combo name
       const nameText = this.add.text(cardX, cardY + 8, combo.name, {
-        fontSize: '10px', color: combo.color, fontStyle: 'bold',
+        fontFamily: FONT, fontSize: '10px', color: combo.color, fontStyle: 'bold',
       }).setOrigin(0.5).setAlpha(alpha);
       this.techTreeOverlay!.add(nameText);
       
@@ -1948,7 +1956,7 @@ export class GameScene extends Phaser.Scene {
         if (this.techTreeOverlay) {
           // Show description tooltip
           const desc = this.add.text(cardX, cardY + cardH / 2 + 10, combo.description, {
-            fontSize: '10px', color: '#cccccc', backgroundColor: '#000000cc',
+            fontFamily: FONT, fontSize: '10px', color: '#cccccc', backgroundColor: '#000000cc',
             padding: { x: 4, y: 2 },
             wordWrap: { width: 160 },
           }).setOrigin(0.5, 0).setDepth(25);
