@@ -169,7 +169,7 @@ export function handleMessage(client: Client, msg: ClientMsg) {
       if (client.id !== room.hostId) return;
       // Merge partial config with validation
       const c = msg.config;
-      if (c.startingGold !== undefined) room.config.startingGold = Math.max(0, Math.min(500, Math.round(c.startingGold)));
+      if (c.startingCredits !== undefined) room.config.startingCredits = Math.max(0, Math.min(2000, Math.round(c.startingCredits)));
       if (c.startingHp !== undefined) room.config.startingHp = Math.max(1, Math.min(500, Math.round(c.startingHp)));
       broadcastLobby(room);
       break;

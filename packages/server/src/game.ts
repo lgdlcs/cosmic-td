@@ -9,68 +9,71 @@ import type {
   GameMap,
   MobInstance,
   TowerInstance,
+  BaseTowerInstance,
+  ElementTowerInstance,
   PlayerColor,
   GridPos,
-  PvPQueueEntry,
+  BossRoundState,
 } from '@ect/shared';
+import type { Element } from '@ect/shared';
 import {
   DEFAULT_GAME_CONFIG,
   GRID_SIZE,
-  SHOP_SLOTS,
   PLAYER_COLORS,
   ALL_MAPS,
   TOTAL_ROUNDS,
-  SHOP_PHASE_DURATION,
-  FIRST_SHOP_PHASE_DURATION,
-  AUGMENT_PICK_DURATION,
+  PREP_PHASE_DURATION,
+  FIRST_PREP_PHASE_DURATION,
+  BOSS_SELECT_DURATION,
+  BOSS_ROUND_INTERVAL,
+  BOSS_DAMAGE_PER_PASS,
   TICK_MS,
   MOB_SYNC_INTERVAL,
-  TOWER_MAP,
-  TOWER_COSTS,
+  BASE_INCOME,
+  KILL_REWARD,
+  ELEMENT_CREDIT_VALUE,
+  SELL_REFUND_RATIO,
+  BASE_TOWER_MAP,
+  ELEMENT_TOWER_MAP,
+  ELEMENT_TOWER_DEFS,
+  getElementUpgradeCost,
+  getTowerSellPrice,
   isPathCell,
-  isAugmentRound,
-  generateAugmentChoices,
-  AUGMENT_POOL,
-  randomElement,
-  getActiveCombo,
-  findCombo,
-  COMBO_MAP,
-  PVP_UNIT_DEFS,
+  ALL_ELEMENTS,
+  PVP_UNIT_MAP,
   MOB_BASE_HP,
   MOB_HP_SCALE,
-  PVP_COSTS,
-  PVP_HP_MULT,
-  PVP_BOSS_HP_MULT,
-  PVP_FLYING_HP_MULT,
-  PVP_FLYING_SPEED,
 } from '@ect/shared';
-import type { Element } from '@ect/shared';
-import type { TowerTier } from '@ect/shared';
-import { ShopManager } from './shop.js';
+import { PvPShopManager } from './shop.js';
 import { CombatManager } from './combat.js';
 import { EconomyManager } from './economy.js';
 import { rooms } from './lobby.js';
+
+function emptyElementInventory(): Record<Element, number> {
+  const inv: Record<string, number> = {};
+  for (const e of ALL_ELEMENTS) inv[e] = 0;
+  return inv as Record<Element, number>;
+}
+
+function emptyBossState(): BossRoundState {
+  return { active: false, passes: 0, damagePerPass: BOSS_DAMAGE_PER_PASS };
+}
 
 export class Game {
   state: GameState;
   map: GameMap;
   clients: Map<string, Client>;
   names: Map<string, string>;
-  shop: ShopManager;
+  pvpShop: PvPShopManager;
   combat: CombatManager;
   economy: EconomyManager;
   tickInterval: ReturnType<typeof setInterval> | null = null;
   phaseTimer: ReturnType<typeof setInterval> | null = null;
   tickCount = 0;
-  roundLeaks: Map<string, number> = new Map();
-  firstKillClaimed: boolean = false;
-  firstClearClaimed: boolean = false;
   speed: number = 1;
   config: GameConfig;
-  /** Track which players have picked augments this round */
-  augmentPicked: Set<string> = new Set();
-  /** PvP unit queues per player (Feature 4) */
-  pvpQueues: Map<string, PvPQueueEntry[]> = new Map();
+  /** PvP units queued to send at start of next combat */
+  pvpPending: { fromId: string; toId: string; unitId: string }[] = [];
 
   constructor(clients: Client[], names: Map<string, string>, colors: Map<string, PlayerColor>, config: GameConfig = DEFAULT_GAME_CONFIG) {
     this.config = config;
@@ -88,16 +91,15 @@ export class Game {
     const players: PlayerState[] = playerIds.map((id, i) => ({
       id,
       name: names.get(id) || `Player ${i + 1}`,
-      color: colors.get(id) || PLAYER_COLORS[i] as PlayerColor, // Use chosen color or fallback to index-based
+      color: colors.get(id) || PLAYER_COLORS[i] as PlayerColor,
       hp: config.startingHp,
-      gold: config.startingGold,
+      credits: config.startingCredits,
+      income: BASE_INCOME,
       towers: [],
-      shop: Array(SHOP_SLOTS).fill(null),
-      augments: [],
-      elements: [],
-      streak: 0,
+      elementInventory: emptyElementInventory(),
+      pureTowerSlot: null,
       alive: true,
-      pvpPoints: 0,
+      bossState: emptyBossState(),
     }));
 
     this.state = {
@@ -108,11 +110,12 @@ export class Game {
       mapId: this.map.id,
       mobs: Object.fromEntries(playerIds.map((id) => [id, []])),
       winner: null,
+      isBossRound: false,
     };
 
-    this.shop = new ShopManager(this.state);
+    this.pvpShop = new PvPShopManager();
     this.combat = new CombatManager(this.state, this.map);
-    this.economy = new EconomyManager(this.state);
+    this.economy = new EconomyManager();
   }
 
   start() {
@@ -126,111 +129,217 @@ export class Game {
     if (!player || !player.alive) return;
 
     switch (msg.type) {
-      case 'BUY_AND_PLACE': {
-        
-        if (msg.shopIndex < 0 || msg.shopIndex >= SHOP_SLOTS) return;
-        const itemId = player.shop[msg.shopIndex];
-        if (!itemId) return;
-
-        // Validate position
-        if (isPathCell(this.map, msg.position)) return;
-        if (msg.position.row < 0 || msg.position.row >= GRID_SIZE ||
-            msg.position.col < 0 || msg.position.col >= GRID_SIZE) return;
-        if (player.towers.some((t) => t.position.row === msg.position.row && t.position.col === msg.position.col)) return;
-
-        const def = TOWER_MAP[itemId];
+      case 'BUY_BASE_TOWER': {
+        if (this.state.phase !== 'prep') return;
+        const def = BASE_TOWER_MAP[msg.towerType];
         if (!def) return;
+        if (!this.isValidPlacement(player, msg.position)) return;
+        if (player.credits < def.cost) return;
 
-        const cost = TOWER_COSTS[def.id] || def.cost;
-        if (player.gold < cost) return;
-
-        // Towers are placed neutral — player applies elements manually
-        const tower: TowerInstance = {
+        const tower: BaseTowerInstance = {
           instanceId: nanoid(8),
-          defId: itemId,
+          kind: 'base',
+          towerType: msg.towerType,
           position: msg.position,
-          stars: 1,
+          tier: 1,
+          totalInvested: def.cost,
         };
+        player.credits -= def.cost;
         player.towers.push(tower);
-        player.gold -= cost;
-        player.shop[msg.shopIndex] = null;
-
-        // Try fusion (legacy, now no-op) and update upgrade indicators
-        this.shop.tryFusion(player, itemId);
-        this.shop.updateCanUpgrade(player);
-
-        this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
+        this.broadcast({ type: 'TOWER_PLACED', playerId, tower });
         this.broadcastStateUpdate();
         break;
       }
+
+      case 'UPGRADE_BASE_TOWER': {
+        if (this.state.phase !== 'prep') return;
+        const tower = player.towers.find(t => t.instanceId === msg.towerId);
+        if (!tower || tower.kind !== 'base') return;
+        const baseTower = tower as BaseTowerInstance;
+        if (baseTower.tier >= 3) return;
+
+        const def = BASE_TOWER_MAP[baseTower.towerType];
+        if (!def) return;
+        const upgradeCost = def.upgradeCosts[baseTower.tier - 1];
+        if (player.credits < upgradeCost) return;
+
+        player.credits -= upgradeCost;
+        baseTower.tier = (baseTower.tier + 1) as 1 | 2 | 3;
+        baseTower.totalInvested += upgradeCost;
+        this.broadcast({ type: 'TOWER_UPGRADED', playerId, towerId: msg.towerId });
+        this.broadcastStateUpdate();
+        break;
+      }
+
+      case 'APPLY_T3_ELEMENT': {
+        if (this.state.phase !== 'prep') return;
+        const tower = player.towers.find(t => t.instanceId === msg.towerId);
+        if (!tower || tower.kind !== 'base') return;
+        const baseTower = tower as BaseTowerInstance;
+        if (baseTower.tier !== 3) return;
+        if (baseTower.t3PlusElement) return; // already has element
+
+        // Spend 1 element from inventory
+        if ((player.elementInventory[msg.element] || 0) < 1) return;
+        player.elementInventory[msg.element]--;
+        baseTower.t3PlusElement = msg.element;
+        baseTower.totalInvested += ELEMENT_CREDIT_VALUE;
+        this.broadcastStateUpdate();
+        break;
+      }
+
+      case 'BUY_ELEMENT_TOWER': {
+        if (this.state.phase !== 'prep') return;
+        if (!this.isValidPlacement(player, msg.position)) return;
+
+        // Find matching element tower def
+        const sortedElems = [...msg.elements].sort();
+        let etDef = null;
+        for (const def of ELEMENT_TOWER_DEFS) {
+          const defElems = [...def.elements].sort();
+          if (defElems.length === sortedElems.length && defElems.every((e, i) => e === sortedElems[i])) {
+            etDef = def;
+            break;
+          }
+        }
+        if (!etDef) return;
+
+        // Check element inventory
+        const cost = etDef.rank1Cost;
+        for (const [elem, qty] of Object.entries(cost)) {
+          if ((player.elementInventory[elem as Element] || 0) < qty) return;
+        }
+
+        // Spend elements
+        for (const [elem, qty] of Object.entries(cost)) {
+          player.elementInventory[elem as Element] -= qty;
+        }
+
+        const tower: ElementTowerInstance = {
+          instanceId: nanoid(8),
+          kind: 'element',
+          elementTowerId: etDef.id,
+          position: msg.position,
+          rank: 1,
+          elements: [...msg.elements],
+          isPure: false,
+          totalInvested: Object.values(cost).reduce((a, b) => a + b, 0) * ELEMENT_CREDIT_VALUE,
+        };
+        player.towers.push(tower);
+        this.broadcast({ type: 'TOWER_PLACED', playerId, tower });
+        this.broadcastStateUpdate();
+        break;
+      }
+
+      case 'UPGRADE_ELEMENT_TOWER': {
+        if (this.state.phase !== 'prep') return;
+        const tower = player.towers.find(t => t.instanceId === msg.towerId);
+        if (!tower || tower.kind !== 'element') return;
+        const elemTower = tower as ElementTowerInstance;
+        if (elemTower.rank >= 3) return;
+
+        const etDef = ELEMENT_TOWER_MAP[elemTower.elementTowerId];
+        if (!etDef) return;
+
+        if (elemTower.rank === 1) {
+          // Rank 1→2: 2x each element
+          const cost = getElementUpgradeCost(etDef, 1);
+          for (const [elem, qty] of Object.entries(cost)) {
+            if ((player.elementInventory[elem as Element] || 0) < qty) return;
+          }
+          for (const [elem, qty] of Object.entries(cost)) {
+            player.elementInventory[elem as Element] -= qty;
+          }
+          elemTower.rank = 2;
+          elemTower.totalInvested += Object.values(cost).reduce((a, b) => a + b, 0) * ELEMENT_CREDIT_VALUE;
+        } else if (elemTower.rank === 2) {
+          // Rank 2→3 (pure): must be mono-element, 3x of that element
+          if (etDef.elements.length !== 1) return; // only mono can go pure
+          if (player.pureTowerSlot !== null) return; // only 1 pure at a time
+
+          const cost = getElementUpgradeCost(etDef, 2);
+          if (Object.keys(cost).length === 0) return;
+          for (const [elem, qty] of Object.entries(cost)) {
+            if ((player.elementInventory[elem as Element] || 0) < qty) return;
+          }
+          for (const [elem, qty] of Object.entries(cost)) {
+            player.elementInventory[elem as Element] -= qty;
+          }
+          elemTower.rank = 3;
+          elemTower.isPure = true;
+          elemTower.totalInvested += Object.values(cost).reduce((a, b) => a + b, 0) * ELEMENT_CREDIT_VALUE;
+          player.pureTowerSlot = elemTower.instanceId;
+        }
+
+        this.broadcast({ type: 'TOWER_UPGRADED', playerId, towerId: msg.towerId });
+        this.broadcastStateUpdate();
+        break;
+      }
+
       case 'SELL_TOWER': {
-        
-        if (this.shop.sellTower(player, msg.instanceId)) {
-          this.broadcastStateUpdate();
+        const towerIdx = player.towers.findIndex(t => t.instanceId === msg.instanceId);
+        if (towerIdx < 0) return;
+        const tower = player.towers[towerIdx];
+        const refund = getTowerSellPrice(tower);
+        player.credits += refund;
+
+        // If selling a pure tower, free the slot
+        if (tower.kind === 'element' && (tower as ElementTowerInstance).isPure) {
+          player.pureTowerSlot = null;
         }
+
+        player.towers.splice(towerIdx, 1);
+        this.broadcast({ type: 'TOWER_SOLD', playerId, towerId: msg.instanceId, refund });
+        this.broadcastStateUpdate();
         break;
       }
-      case 'REROLL': {
-        
-        if (this.shop.reroll(player)) {
-          this.shop.updateCanUpgrade(player);
-          this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
-          this.broadcastStateUpdate();
-        }
-        break;
-      }
-      case 'UPGRADE_TOWER': {
-        if (this.shop.upgradeTower(player, msg.towerId)) {
-          const tower = player.towers.find(t => t.instanceId === msg.towerId);
-          if (tower) {
-            this.broadcast({ type: 'TOWER_UPGRADED', playerId, towerId: msg.towerId, newTier: tower.stars });
-          }
-          this.sendTo(playerId, { type: 'SHOP_UPDATE', shop: player.shop, gold: player.gold });
-          this.broadcastStateUpdate();
-        }
-        break;
-      }
-      case 'PICK_AUGMENT': {
-        if (this.state.phase !== 'augmentPick') return;
-        if (this.augmentPicked.has(playerId)) return;
-        
-        // Validate the augment is in their choices
-        const choices = this.state.augmentChoices?.[playerId] || [];
-        if (!choices.includes(msg.augmentId)) return;
-        
-        player.augments.push(msg.augmentId);
-        this.augmentPicked.add(playerId);
-        
-        // Track element picks — unlocks the element for the player (no auto-apply to towers)
-        const pickedAug = AUGMENT_POOL.find(a => a.id === msg.augmentId);
-        if (pickedAug && pickedAug.effect.type === 'element') {
-          player.elements.push(pickedAug.effect.element);
-          
-          // Check for combo unlock (notify client for display)
-          const combo = getActiveCombo(player.elements);
-          if (combo && player.activeCombo !== combo.id) {
-            player.activeCombo = combo.id;
-            this.broadcast({ type: 'COMBO_UNLOCKED', playerId, comboId: combo.id, comboName: combo.name, comboColor: combo.color });
-          }
-        }
-        
-        this.broadcast({ type: 'AUGMENT_PICKED', playerId, augmentId: msg.augmentId });
-        
-        // Check if all alive players have picked
-        const alivePlayers = this.state.players.filter(p => p.alive);
-        if (alivePlayers.every(p => this.augmentPicked.has(p.id))) {
+
+      case 'SELECT_BOSS_ELEMENT': {
+        if (this.state.phase !== 'bossSelect') return;
+        if (player.bossState.active) return; // already selected
+
+        player.bossState = {
+          active: true,
+          element: msg.element,
+          passes: 0,
+          damagePerPass: BOSS_DAMAGE_PER_PASS,
+        };
+
+        this.broadcast({ type: 'BOSS_SPAWNED', playerId, element: msg.element });
+
+        // Check if all alive players have selected
+        const allSelected = this.state.players
+          .filter(p => p.alive)
+          .every(p => p.bossState.active);
+
+        if (allSelected) {
           if (this.phaseTimer) { clearInterval(this.phaseTimer); this.phaseTimer = null; }
-          this.startShopPhase();
+          this.startBossFight();
         }
         break;
       }
+
+      case 'BUY_PVP_UNIT': {
+        if (this.state.phase !== 'prep') return;
+        const targetPlayer = this.state.players.find(p => p.id === msg.targetPlayerId && p.alive);
+        if (!targetPlayer || targetPlayer.id === playerId) return;
+
+        if (this.pvpShop.buyUnit(player, msg.unitId)) {
+          this.pvpPending.push({ fromId: playerId, toId: msg.targetPlayerId, unitId: msg.unitId });
+          this.broadcast({ type: 'PVP_UNIT_SENT', fromId: playerId, toId: msg.targetPlayerId, unitId: msg.unitId });
+          this.broadcastStateUpdate();
+        }
+        break;
+      }
+
       case 'DEV_START_COMBAT': {
-        if (this.state.phase !== 'shopping') return;
+        if (this.state.phase !== 'prep') return;
         if (this.phaseTimer) { clearInterval(this.phaseTimer); this.phaseTimer = null; }
         this.state.timer = 0;
         this.startCombat();
         break;
       }
+
       case 'SET_SPEED': {
         const s = msg.speed;
         if (![1, 2, 3, 5, 10].includes(s)) return;
@@ -238,71 +347,20 @@ export class Game {
         this.broadcast({ type: 'SPEED_CHANGE', speed: s });
         break;
       }
-      case 'APPLY_ELEMENT': {
-        // Apply an unlocked element or combo to a specific tower
-        const tower = player.towers.find(t => t.instanceId === msg.towerId);
-        if (!tower) return;
-        const towerDef = TOWER_MAP[tower.defId];
-        if (!towerDef || towerDef.towerType === 'pvp') return;
-
-        // Changing element costs 2g (first application is free, removing is free)
-        const ELEMENT_CHANGE_COST = 2;
-        const isChanging = tower.element && (msg.element || msg.comboId);
-        if (isChanging && player.gold < ELEMENT_CHANGE_COST) return;
-        if (isChanging) player.gold -= ELEMENT_CHANGE_COST;
-
-        if (msg.comboId) {
-          // Applying a combo
-          const combo = COMBO_MAP[msg.comboId];
-          if (!combo) return;
-          // Player must have both elements unlocked
-          if (!player.elements.includes(combo.elements[0]) || !player.elements.includes(combo.elements[1])) return;
-          tower.element = combo.elements[0]; // primary element for damage calc
-          tower.combo = combo.id;
-          this.broadcast({ type: 'ELEMENT_APPLIED', playerId, towerId: msg.towerId, comboId: combo.id });
-        } else if (msg.element) {
-          // Applying a single element
-          if (!player.elements.includes(msg.element)) return;
-          tower.element = msg.element;
-          tower.combo = undefined;
-          this.broadcast({ type: 'ELEMENT_APPLIED', playerId, towerId: msg.towerId, element: msg.element });
-        } else {
-          // Remove element (set to neutral)
-          tower.element = undefined;
-          tower.combo = undefined;
-          this.broadcast({ type: 'ELEMENT_APPLIED', playerId, towerId: msg.towerId });
-        }
-        this.broadcastStateUpdate();
-        break;
-      }
-      case 'QUEUE_PVP_UNIT': {
-        // Feature 4: PvP unit queueing (points-based)
-        const unitType = msg.unitType as keyof typeof PVP_COSTS;
-        const cost = PVP_COSTS[unitType];
-        if (!cost) return;
-        
-        // Validate target player exists and is alive
-        const targetPlayer = this.state.players.find(p => p.id === msg.targetPlayerId && p.alive);
-        if (!targetPlayer || targetPlayer.id === playerId) return;
-        
-        // Check if player has enough pvpPoints
-        if (player.pvpPoints < cost) return;
-        
-        // Deduct points and add to queue
-        player.pvpPoints -= cost;
-        
-        if (!this.pvpQueues.has(playerId)) {
-          this.pvpQueues.set(playerId, []);
-        }
-        const queue = this.pvpQueues.get(playerId)!;
-        queue.push({ unitType: msg.unitType, targetPlayerId: msg.targetPlayerId });
-        
-        // Send queue update and state update to sender
-        this.sendTo(playerId, { type: 'PVP_QUEUE_UPDATE', queue: [...queue] });
-        this.broadcastStateUpdate();
-        break;
-      }
     }
+  }
+
+  // ── Helpers ─────────────────────────────────────────
+
+  private isValidPlacement(player: PlayerState, pos: GridPos): boolean {
+    if (isPathCell(this.map, pos)) return false;
+    if (pos.row < 0 || pos.row >= GRID_SIZE || pos.col < 0 || pos.col >= GRID_SIZE) return false;
+    if (player.towers.some(t => t.position.row === pos.row && t.position.col === pos.col)) return false;
+    return true;
+  }
+
+  isBossRound(round: number): boolean {
+    return round > 0 && round % BOSS_ROUND_INTERVAL === 0;
   }
 
   // ── Broadcast ───────────────────────────────────────
@@ -320,59 +378,8 @@ export class Game {
     this.clients.forEach((client) => {
       if (client.ws.readyState === client.ws.OPEN) {
         const filteredState = this.getFilteredStateForPlayer(client.id);
-        const msg = JSON.stringify({
-          type: 'STATE_UPDATE',
-          state: filteredState,
-        } as ServerMsg);
-        client.ws.send(msg);
+        client.ws.send(JSON.stringify({ type: 'STATE_UPDATE', state: filteredState } as ServerMsg));
       }
-    });
-  }
-
-  // Feature 2: Broadcast next wave information
-  broadcastNextWaveInfo() {
-    const nextRound = this.state.round + 1;
-    if (nextRound > TOTAL_ROUNDS) return;
-
-    const isBoss = [5, 10, 15, 20, 25, 30].includes(nextRound);
-    const baseHp = Math.floor(MOB_BASE_HP * Math.pow(MOB_HP_SCALE, nextRound - 1));
-    const baseCount = Math.floor(5 + 0.4 * nextRound);
-
-    let mobType: string;
-    let count: number;
-    let hp: number;
-
-    if (isBoss) {
-      mobType = 'boss';
-      count = nextRound >= 20 ? 2 : 1;
-      hp = Math.floor(baseHp * 5); // BOSS_HP_MULT
-    } else {
-      const isSwarmRound = nextRound % 3 === 0;
-      const isRunnerRound = !isSwarmRound && nextRound % 2 === 0;
-
-      if (isSwarmRound) {
-        mobType = 'swarm';
-        count = Math.floor(baseCount * 2.5);
-        hp = Math.floor(baseHp * 0.4);
-      } else if (isRunnerRound) {
-        mobType = 'runner';
-        count = baseCount;
-        hp = Math.floor(baseHp * 0.6);
-      } else {
-        mobType = 'tank';
-        count = Math.max(2, Math.floor(baseCount * 0.6));
-        hp = Math.floor(baseHp * 2.2);
-      }
-    }
-
-    const element = nextRound >= 3 ? randomElement() : undefined;
-
-    this.broadcast({
-      type: 'NEXT_WAVE_INFO',
-      mobType,
-      element,
-      count,
-      hp,
     });
   }
 
@@ -383,38 +390,10 @@ export class Game {
         if (p.id === playerId) return p;
         return {
           ...p,
-          gold: 0,
-          shop: [],
-          streak: 0,
+          credits: 0,
         } as PlayerState;
       }),
     };
-  }
-
-  sendLeakedMobToOpponent(fromPlayerId: string, leakedMob: MobInstance) {
-    const opponents = this.state.players.filter(p => p.alive && p.id !== fromPlayerId);
-    if (opponents.length === 0) return;
-
-    const target = opponents[Math.floor(Math.random() * opponents.length)];
-    const entry = this.map.entry;
-    const newMob: MobInstance = {
-      instanceId: nanoid(8),
-      defId: leakedMob.defId,
-      hp: leakedMob.hp,
-      maxHp: leakedMob.maxHp,
-      x: entry.col,
-      y: entry.row - 0.5,
-      pathIndex: 0,
-      effects: [],
-      visible: true,
-      element: leakedMob.element,
-      armor: 0,
-    };
-
-    if (!this.state.mobs[target.id]) {
-      this.state.mobs[target.id] = [];
-    }
-    this.state.mobs[target.id].push(newMob);
   }
 
   sendTo(playerId: string, msg: ServerMsg) {
@@ -433,45 +412,32 @@ export class Game {
       return;
     }
 
-    // Check if this round should have augment pick
-    if (isAugmentRound(this.state.round)) {
-      this.startAugmentPick();
+    this.state.isBossRound = this.isBossRound(this.state.round);
+
+    if (this.state.isBossRound) {
+      this.startBossSelect();
     } else {
-      this.startShopPhase();
+      this.startPrepPhase();
     }
   }
 
-  startAugmentPick() {
-    this.state.phase = 'augmentPick';
-    this.augmentPicked.clear();
+  startBossSelect() {
+    this.state.phase = 'bossSelect';
+    this.state.timer = BOSS_SELECT_DURATION;
 
-    // Generate 3 choices per player
-    const augmentChoices: Record<string, string[]> = {};
+    // Reset boss state for all players
     this.state.players.filter(p => p.alive).forEach(p => {
-      const choices = generateAugmentChoices(this.state.round, p.augments);
-      augmentChoices[p.id] = choices.map(a => a.id);
-      
-      // Send choices to this player
-      this.sendTo(p.id, {
-        type: 'AUGMENT_CHOICES',
-        choices: choices.map(a => ({
-          id: a.id,
-          name: a.name,
-          description: a.description,
-          icon: a.icon,
-          tier: a.tier,
-        })),
-      });
+      p.bossState = emptyBossState();
     });
-    this.state.augmentChoices = augmentChoices;
 
-    this.state.timer = AUGMENT_PICK_DURATION;
     this.broadcast({
       type: 'PHASE_CHANGE',
-      phase: 'augmentPick',
+      phase: 'bossSelect',
       round: this.state.round,
-      timer: AUGMENT_PICK_DURATION,
+      timer: BOSS_SELECT_DURATION,
     });
+    this.broadcast({ type: 'BOSS_SELECT', round: this.state.round });
+    this.broadcastStateUpdate();
 
     if (this.phaseTimer) { clearInterval(this.phaseTimer); this.phaseTimer = null; }
     this.phaseTimer = setInterval(() => {
@@ -480,50 +446,164 @@ export class Game {
         this.state.timer = 0;
         clearInterval(this.phaseTimer!);
         this.phaseTimer = null;
-        
-        // Auto-pick for players who didn't choose
-        this.state.players.filter(p => p.alive && !this.augmentPicked.has(p.id)).forEach(p => {
-          const choices = this.state.augmentChoices?.[p.id] || [];
-          if (choices.length > 0) {
-            const randomPick = choices[Math.floor(Math.random() * choices.length)];
-            p.augments.push(randomPick);
-            // Track element for auto-picks too (no auto-apply to towers)
-            const aug = AUGMENT_POOL.find(a => a.id === randomPick);
-            if (aug && aug.effect.type === 'element') {
-              p.elements.push(aug.effect.element);
-              const combo = getActiveCombo(p.elements);
-              if (combo && p.activeCombo !== combo.id) {
-                p.activeCombo = combo.id;
-                this.broadcast({ type: 'COMBO_UNLOCKED', playerId: p.id, comboId: combo.id, comboName: combo.name, comboColor: combo.color });
-              }
-            }
-            this.broadcast({ type: 'AUGMENT_PICKED', playerId: p.id, augmentId: randomPick });
-          }
+
+        // Auto-select random element for players who didn't pick
+        this.state.players.filter(p => p.alive && !p.bossState.active).forEach(p => {
+          const elem = ALL_ELEMENTS[Math.floor(Math.random() * ALL_ELEMENTS.length)];
+          p.bossState = {
+            active: true,
+            element: elem,
+            passes: 0,
+            damagePerPass: BOSS_DAMAGE_PER_PASS,
+          };
+          this.broadcast({ type: 'BOSS_SPAWNED', playerId: p.id, element: elem });
         });
-        
-        this.startShopPhase();
+
+        this.startBossFight();
       }
     }, 1000);
   }
 
-  startShopPhase() {
-    this.state.phase = 'shopping';
-    this.state.augmentChoices = undefined;
-    const duration = this.state.round === 1 ? FIRST_SHOP_PHASE_DURATION : SHOP_PHASE_DURATION;
+  startBossFight() {
+    this.state.phase = 'bossFight';
+    this.broadcast({
+      type: 'PHASE_CHANGE',
+      phase: 'bossFight',
+      round: this.state.round,
+      timer: 0,
+    });
+
+    // Spawn boss for each player
+    this.state.players.filter(p => p.alive).forEach(p => {
+      const bossElem = p.bossState.element!;
+      const boss = this.combat.spawnBoss(this.state.round, bossElem);
+      this.state.mobs[p.id] = [boss];
+      p.bossState.bossHp = boss.hp;
+      p.bossState.bossMaxHp = boss.maxHp;
+    });
+
+    this.broadcastStateUpdate();
+
+    // Start combat tick
+    if (this.tickInterval) { clearInterval(this.tickInterval); this.tickInterval = null; }
+    this.tickCount = 0;
+    this.tickInterval = setInterval(() => {
+      for (let i = 0; i < this.speed; i++) {
+        if (this.state.phase !== 'bossFight') break;
+        this.bossTick();
+      }
+    }, TICK_MS);
+  }
+
+  bossTick() {
+    if (this.state.phase === 'gameOver') return;
+    this.tickCount++;
+
+    this.state.players.filter(p => p.alive).forEach(p => {
+      const mobs = this.state.mobs[p.id] || [];
+      if (mobs.length === 0) return; // boss already killed
+
+      const result = this.combat.tick(p, mobs, TICK_MS);
+
+      // Boss killed
+      result.killed.forEach(mob => {
+        if (mob.isBoss && mob.bossElement) {
+          const elem = mob.bossElement;
+          p.elementInventory[elem] = (p.elementInventory[elem] || 0) + 1;
+          p.credits += this.economy.bossKillReward();
+          this.broadcast({ type: 'BOSS_KILLED', playerId: p.id, element: elem });
+          this.broadcast({ type: 'ELEMENT_GAINED', playerId: p.id, element: elem, newCount: p.elementInventory[elem] });
+        }
+      });
+
+      // Boss leaked = loops back, player takes damage
+      result.leaked.forEach(mob => {
+        if (mob.isBoss) {
+          p.bossState.passes++;
+          const dmg = p.bossState.damagePerPass;
+          p.hp = Math.max(0, p.hp - dmg);
+          this.broadcast({ type: 'BOSS_PASS', playerId: p.id, damage: dmg, passes: p.bossState.passes });
+
+          // Respawn boss at entry
+          mob.x = this.map.entry.col;
+          mob.y = this.map.entry.row;
+          mob.pathIndex = 0;
+          mob.effects = [];
+          result.remaining.push(mob);
+        }
+      });
+
+      if (result.attacks.length > 0 || result.killed.length > 0) {
+        this.broadcast({
+          type: 'COMBAT_EVENTS',
+          playerId: p.id,
+          attacks: result.attacks.map(a => ({
+            towerX: a.towerX, towerY: a.towerY,
+            targetX: a.targetX, targetY: a.targetY,
+            damage: a.damage, element: a.element,
+            towerElement: a.towerElement, mobElement: a.mobElement,
+            effectiveness: a.effectiveness, splash: a.splash,
+          })),
+          kills: result.killed.map(m => ({ mobId: m.instanceId, x: m.x, y: m.y, gold: 0 })),
+          leaks: [],
+        });
+      }
+
+      this.state.mobs[p.id] = result.remaining;
+    });
+
+    // Check player deaths
+    this.state.players.forEach(p => {
+      if (p.alive && p.hp <= 0) {
+        p.alive = false;
+        this.broadcast({ type: 'PLAYER_ELIMINATED', playerId: p.id });
+      }
+    });
+
+    // Check win condition
+    const alivePlayers = this.state.players.filter(p => p.alive);
+    if (alivePlayers.length === 0 || (this.state.players.length > 1 && alivePlayers.length <= 1)) {
+      clearInterval(this.tickInterval!);
+      this.endGame();
+      return;
+    }
+
+    if (this.tickCount % MOB_SYNC_INTERVAL === 0) {
+      this.broadcast({ type: 'MOB_SYNC', mobs: this.state.mobs });
+    }
+    if (this.tickCount % 10 === 0) {
+      this.broadcastStateUpdate();
+    }
+
+    // Check if all bosses are dead
+    const allBossesDead = this.state.players
+      .filter(p => p.alive)
+      .every(p => (this.state.mobs[p.id] || []).length === 0);
+
+    if (allBossesDead) {
+      clearInterval(this.tickInterval!);
+      this.tickInterval = null;
+      // Boss round done → go to prep phase
+      this.startPrepPhase();
+    }
+  }
+
+  startPrepPhase() {
+    this.state.phase = 'prep';
+    const duration = this.state.round <= 1 ? FIRST_PREP_PHASE_DURATION : PREP_PHASE_DURATION;
     this.state.timer = duration;
 
-    // Feature 2: Broadcast next wave info
-    this.broadcastNextWaveInfo();
-
-    // Generate shops and compute upgrade indicators
-    this.state.players.filter((p) => p.alive).forEach((p) => {
-      p.shop = this.shop.generateShop(p);
-      this.shop.updateCanUpgrade(p);
+    // Give income
+    this.state.players.filter(p => p.alive).forEach(p => {
+      this.economy.endOfRoundIncome(p);
     });
+
+    // Broadcast next wave info
+    this.broadcastNextWaveInfo();
 
     this.broadcast({
       type: 'PHASE_CHANGE',
-      phase: 'shopping',
+      phase: 'prep',
       round: this.state.round,
       timer: duration,
     });
@@ -541,94 +621,48 @@ export class Game {
     }, 1000);
   }
 
+  broadcastNextWaveInfo() {
+    const nextRound = this.state.round + 1;
+    if (nextRound > TOTAL_ROUNDS) return;
+    if (this.isBossRound(nextRound)) {
+      this.broadcast({ type: 'NEXT_WAVE_INFO', mobType: 'boss', count: 1, hp: 0 });
+      return;
+    }
+
+    const baseHp = Math.floor(MOB_BASE_HP * Math.pow(MOB_HP_SCALE, nextRound - 1));
+    const baseCount = Math.floor(5 + 0.4 * nextRound);
+    const isSwarmRound = nextRound % 3 === 0;
+    const isRunnerRound = !isSwarmRound && nextRound % 2 === 0;
+
+    let mobType: string, count: number, hp: number;
+    if (isSwarmRound) { mobType = 'swarm'; count = Math.floor(baseCount * 2.5); hp = Math.floor(baseHp * 0.4); }
+    else if (isRunnerRound) { mobType = 'runner'; count = baseCount; hp = Math.floor(baseHp * 0.6); }
+    else { mobType = 'tank'; count = Math.max(2, Math.floor(baseCount * 0.6)); hp = Math.floor(baseHp * 2.2); }
+
+    this.broadcast({ type: 'NEXT_WAVE_INFO', mobType, count, hp });
+  }
+
   startCombat() {
     if (this.state.phase === 'gameOver') return;
     this.state.phase = 'combat';
-    this.broadcast({
-      type: 'PHASE_CHANGE',
-      phase: 'combat',
-      round: this.state.round,
-      timer: 0,
-    });
+    this.broadcast({ type: 'PHASE_CHANGE', phase: 'combat', round: this.state.round, timer: 0 });
 
-    // Spawn mobs for each alive player
-    this.state.players.filter((p) => p.alive).forEach((p) => {
-      this.state.mobs[p.id] = this.combat.spawnWave(this.state.round, p);
-    });
-
-    // Feature 4: Spawn PvP units from queue (points-based)
+    // Spawn wave mobs for each alive player
     this.state.players.filter(p => p.alive).forEach(p => {
-      const queue = this.pvpQueues.get(p.id) || [];
-      let delay = 1.5;
-      
-      // Determine current round's mob type for PvP basic units
-      const roundBaseHp = Math.floor(MOB_BASE_HP * Math.pow(MOB_HP_SCALE, this.state.round - 1));
-      const isBossRound = [5, 10, 15, 20, 25, 30].includes(this.state.round);
-      const isSwarmRound = this.state.round % 3 === 0;
-      const isRunnerRound = !isSwarmRound && this.state.round % 2 === 0;
-      const roundMobType = isBossRound ? 'boss' : isSwarmRound ? 'swarm' : isRunnerRound ? 'runner' : 'tank';
-      
-      for (const entry of queue) {
-        const targetPlayer = this.state.players.find(tp => tp.id === entry.targetPlayerId && tp.alive);
-        if (!targetPlayer) continue;
-        
-        const mapEntry = this.map.entry;
-        let hp: number;
-        let defId: string;
-        let isFlying = false;
-        
-        if (entry.unitType === 'boss') {
-          hp = Math.floor(roundBaseHp * PVP_BOSS_HP_MULT);
-          defId = 'boss';
-        } else if (entry.unitType === 'flying') {
-          hp = Math.floor(roundBaseHp * PVP_FLYING_HP_MULT);
-          defId = 'flying';
-          isFlying = true;
-        } else {
-          // basic — matches current round mob type with 1.5x HP boost
-          hp = Math.floor(roundBaseHp * PVP_HP_MULT);
-          defId = roundMobType;
-        }
-        
-        const newMob: MobInstance = {
-          instanceId: nanoid(8),
-          defId,
-          hp,
-          maxHp: hp,
-          x: mapEntry.col,
-          y: mapEntry.row - delay,
-          pathIndex: 0,
-          effects: [],
-          visible: true,
-          element: this.state.round >= 3 ? randomElement() : undefined,
-          armor: 0,
-          isPvp: true,
-          isFlying,
-        };
-        
-        if (!this.state.mobs[targetPlayer.id]) {
-          this.state.mobs[targetPlayer.id] = [];
-        }
-        this.state.mobs[targetPlayer.id].push(newMob);
-        
-        delay += 0.5;
-      }
-      
-      // Clear queue after spawning
-      this.pvpQueues.set(p.id, []);
-      this.sendTo(p.id, { type: 'PVP_QUEUE_UPDATE', queue: [] });
+      this.state.mobs[p.id] = this.combat.spawnWave(this.state.round);
     });
 
-    // Warp Gates no longer auto-spawn mobs — they generate PvP points in endRound
+    // Spawn PvP units
+    for (const pend of this.pvpPending) {
+      const target = this.state.players.find(p => p.id === pend.toId && p.alive);
+      if (!target) continue;
+      const pvpMob = this.combat.spawnPvPMob(this.state.round, pend.unitId);
+      if (!this.state.mobs[target.id]) this.state.mobs[target.id] = [];
+      this.state.mobs[target.id].push(pvpMob);
+    }
+    this.pvpPending = [];
 
     this.broadcastStateUpdate();
-
-    this.roundLeaks.clear();
-    this.firstKillClaimed = false;
-    this.firstClearClaimed = false;
-    this.state.players.filter((p) => p.alive).forEach((p) => {
-      this.roundLeaks.set(p.id, 0);
-    });
 
     if (this.tickInterval) { clearInterval(this.tickInterval); this.tickInterval = null; }
     this.tickCount = 0;
@@ -644,90 +678,63 @@ export class Game {
     if (this.state.phase === 'gameOver') return;
     this.tickCount++;
 
-    this.state.players.filter((p) => p.alive).forEach((p) => {
+    this.state.players.filter(p => p.alive).forEach(p => {
       const result = this.combat.tick(p, this.state.mobs[p.id], TICK_MS);
 
       result.killed.forEach(() => {
-        // No kill rewards — income comes from round income
+        p.credits += KILL_REWARD;
       });
 
-      result.leaked.forEach((mob) => {
-        const damage = mob.hp > 0 ? Math.ceil(mob.hp / mob.maxHp * 3) + 1 : 1;
+      result.leaked.forEach(mob => {
+        const damage = Math.ceil(mob.maxHp / 50) + 1;
         p.hp = Math.max(0, p.hp - damage);
-        this.roundLeaks.set(p.id, (this.roundLeaks.get(p.id) || 0) + 1);
-
-        this.broadcast({
-          type: 'MOB_LEAKED',
-          playerId: p.id,
-          mobId: mob.instanceId,
-          damage,
-          sentTo: '',
-        });
-
-        this.sendLeakedMobToOpponent(p.id, mob);
+        this.broadcast({ type: 'MOB_LEAKED', playerId: p.id, mobId: mob.instanceId, damage });
       });
 
       if (result.attacks.length > 0 || result.killed.length > 0 || result.leaked.length > 0) {
         this.broadcast({
           type: 'COMBAT_EVENTS',
           playerId: p.id,
-          attacks: result.attacks.map((a) => ({
-            towerX: a.towerX,
-            towerY: a.towerY,
-            targetX: a.targetX,
-            targetY: a.targetY,
-            damage: a.damage,
-            element: a.element,
-            splash: a.splash,
+          attacks: result.attacks.map(a => ({
+            towerX: a.towerX, towerY: a.towerY,
+            targetX: a.targetX, targetY: a.targetY,
+            damage: a.damage, element: a.element,
+            towerElement: a.towerElement, mobElement: a.mobElement,
+            effectiveness: a.effectiveness, splash: a.splash,
           })),
-          kills: result.killed.map((m) => ({
-            mobId: m.instanceId,
-            x: m.x,
-            y: m.y,
-            gold: 0,
-          })),
-          leaks: result.leaked.map((m) => m.instanceId),
+          kills: result.killed.map(m => ({ mobId: m.instanceId, x: m.x, y: m.y, gold: KILL_REWARD })),
+          leaks: result.leaked.map(m => m.instanceId),
         });
       }
 
       this.state.mobs[p.id] = result.remaining;
-
-      // First player to clear all mobs gets +3g bonus
-      if (result.remaining.length === 0 && !this.firstClearClaimed && this.state.phase === 'combat') {
-        this.firstClearClaimed = true;
-        p.gold += 3;
-        this.broadcast({ type: 'FIRST_CLEAR', playerId: p.id, bonus: 3 });
-      }
     });
 
     if (this.tickCount % MOB_SYNC_INTERVAL === 0) {
       this.broadcast({ type: 'MOB_SYNC', mobs: this.state.mobs });
     }
-
     if (this.tickCount % 10 === 0) {
       this.broadcastStateUpdate();
     }
 
-    this.state.players.forEach((p) => {
+    // Check eliminations
+    this.state.players.forEach(p => {
       if (p.alive && p.hp <= 0) {
         p.alive = false;
         this.broadcast({ type: 'PLAYER_ELIMINATED', playerId: p.id });
       }
     });
 
-    const alivePlayers = this.state.players.filter((p) => p.alive);
-    if (alivePlayers.length === 0 ||
-        (this.state.players.length > 1 && alivePlayers.length <= 1)) {
+    const alivePlayers = this.state.players.filter(p => p.alive);
+    if (alivePlayers.length === 0 || (this.state.players.length > 1 && alivePlayers.length <= 1)) {
       clearInterval(this.tickInterval!);
       this.endGame();
       return;
     }
 
-    const allMobsDone = this.state.players
-      .filter((p) => p.alive)
-      .every((p) => this.state.mobs[p.id].length === 0);
-
-    if (allMobsDone) {
+    // Check if all mobs cleared
+    const allDone = this.state.players.filter(p => p.alive).every(p => (this.state.mobs[p.id] || []).length === 0);
+    if (allDone) {
       clearInterval(this.tickInterval!);
       this.endRound();
     }
@@ -735,21 +742,6 @@ export class Game {
 
   endRound() {
     if (this.state.phase === 'gameOver') return;
-    this.state.players.filter((p) => p.alive).forEach((p) => {
-      const leakCount = this.roundLeaks.get(p.id) || 0;
-      this.economy.endOfRoundIncome(p, leakCount === 0);
-      
-      // Generate PvP points from Warp Gates (1★=1pt, 2★=2pt, 3★=3pt per gate)
-      const pvpTowers = p.towers.filter(t => t.defId === 'pvp');
-      let pvpPointsGain = 0;
-      for (const tower of pvpTowers) {
-        pvpPointsGain += tower.stars;
-      }
-      if (pvpPointsGain > 0) {
-        p.pvpPoints += pvpPointsGain;
-      }
-    });
-
     this.broadcastStateUpdate();
     this.startNextRound();
   }
@@ -760,7 +752,7 @@ export class Game {
     if (this.tickInterval) { clearInterval(this.tickInterval); this.tickInterval = null; }
     if (this.phaseTimer) { clearInterval(this.phaseTimer); this.phaseTimer = null; }
 
-    const alive = this.state.players.filter((p) => p.alive);
+    const alive = this.state.players.filter(p => p.alive);
     const winner = alive.length > 0
       ? alive.reduce((a, b) => (a.hp >= b.hp ? a : b))
       : this.state.players[0];
@@ -777,10 +769,7 @@ export class Game {
       setTimeout(() => {
         activeGames.delete(roomCode);
         rooms.delete(roomCode);
-        this.clients.forEach((client) => {
-          client.roomCode = null;
-        });
-        console.log(`[cleanup] Removed game + room ${roomCode}`);
+        this.clients.forEach(client => { client.roomCode = null; });
       }, 500);
     }
   }
@@ -800,9 +789,9 @@ export function createGame(clients: Client[], names: Map<string, string>, colors
   if (clients[0].roomCode) {
     activeGames.set(clients[0].roomCode, game);
   }
-  clients.forEach((c) => playerToGame.set(c.id, game));
+  clients.forEach(c => playerToGame.set(c.id, game));
 
-  clients.forEach((c) => {
+  clients.forEach(c => {
     game.sendTo(c.id, { type: 'YOUR_ID', id: c.id });
     game.sendTo(c.id, { type: 'GAME_START', state: game.state, mapDef: game.map });
   });
