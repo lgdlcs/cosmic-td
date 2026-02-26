@@ -1,156 +1,195 @@
-import type { TowerDef, TowerType } from './types.js';
+import type { BaseTowerDef, BaseTowerInstance, ElementTowerInstance, TowerInstance, ElementTowerDef } from './types.js';
 import type { Element } from './elements.js';
-import { ELEMENT_COLOR } from './elements.js';
+import { ALL_ELEMENTS, ELEMENT_COLOR, ELEMENT_EMOJI } from './elements.js';
+import { COMBO_DEFS, findCombo } from './combos.js';
 
-// ── 4 Simple Tower Types ────────────────────────────────
+// ── Base Tower Definitions ──────────────────────────────
 
-export const TOWER_DEFS: TowerDef[] = [
+export const BASE_TOWER_DEFS: BaseTowerDef[] = [
   {
-    id: 'arrow',
+    id: 'blaster',
     name: 'Blaster',
-    towerType: 'arrow',
-    cost: 3,
-    damage: 8,
-    attackSpeed: 1.25,  // 1/0.8
-    range: 3,
+    towerType: 'blaster',
+    cost: 100,
+    tiers: [
+      { damage: 10, attackSpeed: 1.25, range: 3 },          // T1
+      { damage: 22, attackSpeed: 1.5, range: 3.5 },         // T2
+      { damage: 40, attackSpeed: 1.8, range: 4 },           // T3
+    ],
+    upgradeCosts: [150, 250], // T1→T2: 150, T2→T3: 250
     description: 'Rapid fire laser shots',
+    t3PlusBonus: 'Elemental shots: apply element effects on hit',
   },
   {
-    id: 'cannon',
+    id: 'railgun',
     name: 'Railgun',
-    towerType: 'cannon',
-    cost: 5,
-    damage: 25,
-    attackSpeed: 0.5,  // 1/2.0
-    range: 2.5,
-    description: 'Slow, massive kinetic impact',
-    splashRadius: 0.5,
-  },
-  {
-    id: 'income',
-    name: 'Arcane Tower',
-    towerType: 'income',
-    cost: 5,
-    damage: 15,
-    attackSpeed: 0.8,
-    range: 3,
-    description: 'Needs an element to fire. Combo = 2x damage',
-  },
-  {
-    id: 'pvp',
-    name: 'Warp Gate',
-    towerType: 'pvp',
-    cost: 6,
-    damage: 0,
-    attackSpeed: 0,
-    range: 0,
-    description: 'Generates PvP points per round. Use points to send units to opponents.',
-    mobPower: 1.0,
+    towerType: 'railgun',
+    cost: 150,
+    tiers: [
+      { damage: 30, attackSpeed: 0.5, range: 2.5, splashRadius: 0.5 },   // T1
+      { damage: 65, attackSpeed: 0.6, range: 3, splashRadius: 0.7 },     // T2
+      { damage: 120, attackSpeed: 0.7, range: 3.5, splashRadius: 1.0 },  // T3
+    ],
+    upgradeCosts: [200, 350], // T1→T2: 200, T2→T3: 350
+    description: 'Slow, massive kinetic impact with splash',
+    t3PlusBonus: 'Elemental splash: element effects apply to all splashed targets',
   },
 ];
 
-export const TOWER_MAP: Record<string, TowerDef> = Object.fromEntries(
-  TOWER_DEFS.map((t) => [t.id, t])
+export const BASE_TOWER_MAP: Record<string, BaseTowerDef> = Object.fromEntries(
+  BASE_TOWER_DEFS.map((t) => [t.id, t])
 );
 
-// ── Star Upgrade Stats ──────────────────────────────────
+// ── Element Tower Definitions (from combos + mono) ──────
+
+function buildElementTowerDefs(): ElementTowerDef[] {
+  const defs: ElementTowerDef[] = [];
+
+  // Mono-element towers (7 towers, one per element)
+  for (const elem of ALL_ELEMENTS) {
+    defs.push({
+      id: `MONO_${elem.toUpperCase()}`,
+      name: `${elem.charAt(0).toUpperCase() + elem.slice(1)} Tower`,
+      elements: [elem],
+      rank1Cost: { [elem]: 1 } as Record<Element, number>,
+      description: `Pure ${elem} element tower`,
+    });
+  }
+
+  // Combo towers (21 combos)
+  for (const combo of COMBO_DEFS) {
+    const cost: Record<Element, number> = {} as Record<Element, number>;
+    cost[combo.elements[0]] = 1;
+    cost[combo.elements[1]] = (cost[combo.elements[1]] || 0) + 1;
+    defs.push({
+      id: combo.id,
+      name: combo.name,
+      elements: [...combo.elements],
+      comboId: combo.id,
+      rank1Cost: cost,
+      description: combo.description,
+    });
+  }
+
+  return defs;
+}
+
+export const ELEMENT_TOWER_DEFS: ElementTowerDef[] = buildElementTowerDefs();
+
+export const ELEMENT_TOWER_MAP: Record<string, ElementTowerDef> = Object.fromEntries(
+  ELEMENT_TOWER_DEFS.map((t) => [t.id, t])
+);
+
+// ── Stats Helpers ───────────────────────────────────────
 
 export interface TowerStats {
   damage: number;
   attackSpeed: number;
   range: number;
   splashRadius?: number;
-  incomePerRound?: number;
-  mobPower?: number;
   displayName: string;
   element?: Element;
-  elementTier: number; // 0 = none, 1 = single element, 2 = dual element (tier 2)
+  comboId?: string;
 }
 
-/** Get tower stats accounting for star level, augments, and element */
-export function getTowerStats(
-  def: TowerDef,
-  stars: number,
-  augmentIds?: string[],
-  element?: Element,
-  elementTier?: number,
-): TowerStats {
-  // stars: 1=T1 (1x), 2=T2 (2x), 3=T3 (3x)
-  const starMult = stars >= 3 ? 3 : stars >= 2 ? 2 : 1;
+export function getBaseTowerStats(def: BaseTowerDef, tier: 1 | 2 | 3, t3PlusElement?: Element): TowerStats {
+  const t = def.tiers[tier - 1];
+  let damage = t.damage;
+  let attackSpeed = t.attackSpeed;
 
-  let damage = def.damage * starMult;
-  let attackSpeed = def.attackSpeed * starMult;
-  let range = def.range;
-  let splashRadius = def.splashRadius;
-  let incomePerRound = def.incomePerRound ? def.incomePerRound * starMult : undefined;
-  let mobPower = def.mobPower ? def.mobPower * starMult : undefined;
-
-  // Apply augment buffs
-  if (augmentIds) {
-    for (const id of augmentIds) {
-      if (id === 'ARROW_MASTERY' && def.towerType === 'arrow') {
-        damage *= 1.2;
-      }
-      if (id === 'CANNON_MASTERY' && def.towerType === 'cannon' && splashRadius) {
-        splashRadius *= 1.5;
-      }
-      if (id === 'MEGA_INCOME' && def.towerType === 'income' && incomePerRound) {
-        incomePerRound *= 2;
-      }
-      if (id === 'WIND_BOOST') {
-        attackSpeed *= (1 / 0.85); // 15% faster
-      }
-    }
+  // T3+ bonus: +25% damage
+  if (tier === 3 && t3PlusElement) {
+    damage *= 1.25;
   }
 
-  // Nebula element: +25% attack speed for blasters (tier 2: +40%)
-  if (element === 'nebula' && def.towerType === 'arrow') {
-    const nebulaBonus = (elementTier || 1) >= 2 ? 1.4 : 1.25;
-    attackSpeed *= nebulaBonus;
-  }
+  const tierLabel = tier >= 3 ? (t3PlusElement ? ' T3+' : ' T3') : tier >= 2 ? ' T2' : '';
+  const elemLabel = t3PlusElement ? ` [${t3PlusElement}]` : '';
 
-  // Asteroid element: +30% splash radius for railguns (tier 2: +50%)
-  if (element === 'asteroid' && def.towerType === 'cannon' && splashRadius) {
-    const asteroidBonus = (elementTier || 1) >= 2 ? 1.5 : 1.3;
-    splashRadius *= asteroidBonus;
-  }
-
-  // Arcane Tower: no element = no damage, combo = 2x
-  if (def.towerType === 'income') {
-    if (!element) {
-      damage = 0;
-      attackSpeed = 0;
-    } else if ((elementTier || 0) >= 2) {
-      damage *= 2;
-    }
-  }
-
-  const starLabel = stars >= 3 ? ' ★★★' : stars >= 2 ? ' ★★' : '';
-  const elemLabel = element ? ` [${element.charAt(0).toUpperCase() + element.slice(1)}]` : '';
   return {
     damage: Math.round(damage * 10) / 10,
     attackSpeed: Math.round(attackSpeed * 100) / 100,
-    range,
-    splashRadius,
-    incomePerRound,
-    mobPower,
-    displayName: `${def.name}${starLabel}${elemLabel}`,
-    element,
-    elementTier: elementTier || 0,
+    range: t.range,
+    splashRadius: t.splashRadius,
+    displayName: `${def.name}${tierLabel}${elemLabel}`,
+    element: t3PlusElement,
   };
+}
+
+export function getElementTowerStats(def: ElementTowerDef, rank: 1 | 2 | 3): TowerStats {
+  // Base stats scale with rank
+  const baseDamage = def.elements.length === 1 ? 15 : 25;
+  const baseSpeed = def.elements.length === 1 ? 1.0 : 0.8;
+  const baseRange = 3;
+
+  const rankMult = rank === 3 ? 3 : rank === 2 ? 2 : 1;
+
+  return {
+    damage: Math.round(baseDamage * rankMult),
+    attackSpeed: Math.round(baseSpeed * (1 + (rank - 1) * 0.15) * 100) / 100,
+    range: baseRange + (rank - 1) * 0.5,
+    displayName: `${def.name}${rank > 1 ? ` R${rank}` : ''}`,
+    element: def.elements[0],
+    comboId: def.comboId,
+  };
+}
+
+/** Get the cost to upgrade an element tower to the next rank */
+export function getElementUpgradeCost(def: ElementTowerDef, currentRank: 1 | 2): Record<Element, number> {
+  const cost: Record<Element, number> = {} as Record<Element, number>;
+  const nextRank = currentRank + 1;
+
+  if (nextRank === 2) {
+    // Rank 2 = 2x each element
+    for (const elem of def.elements) {
+      cost[elem] = (cost[elem] || 0) + 2;
+    }
+  } else if (nextRank === 3) {
+    // Rank 3 (pure) = 3x of ONE element (must be mono-element tower)
+    if (def.elements.length !== 1) {
+      // Can't go pure on combo towers
+      return cost;
+    }
+    cost[def.elements[0]] = 3;
+  }
+
+  return cost;
+}
+
+// ── Sell Price ───────────────────────────────────────────
+
+export const SELL_RATIO = 0.7;
+
+export function getBaseTowerSellPrice(tower: BaseTowerInstance): number {
+  return Math.floor(tower.totalInvested * SELL_RATIO);
+}
+
+export function getElementTowerSellPrice(tower: ElementTowerInstance): number {
+  return Math.floor(tower.totalInvested * SELL_RATIO);
+}
+
+export function getTowerSellPrice(tower: TowerInstance): number {
+  if (tower.kind === 'base') return getBaseTowerSellPrice(tower);
+  return getElementTowerSellPrice(tower);
 }
 
 // ── Tower Colors for Rendering ──────────────────────────
 
-export const TOWER_COLORS: Record<TowerType, string> = {
-  arrow: '#4EA8DE',
-  cannon: '#FF6B35',
-  income: '#FFD93D',
-  pvp: '#9B5DE5',
+export const TOWER_TYPE_COLORS: Record<string, string> = {
+  blaster: '#4EA8DE',
+  railgun: '#FF6B35',
 };
 
-/** Get tower display color, using element color if available */
-export function getTowerDisplayColor(towerType: TowerType, element?: Element): string {
-  if (element) return ELEMENT_COLOR[element];
-  return TOWER_COLORS[towerType];
+export function getTowerDisplayColor(tower: TowerInstance): string {
+  if (tower.kind === 'base') {
+    if (tower.t3PlusElement) return ELEMENT_COLOR[tower.t3PlusElement];
+    return TOWER_TYPE_COLORS[tower.towerType] || '#ffffff';
+  }
+  // Element tower: use element color or combo color
+  const def = ELEMENT_TOWER_MAP[tower.elementTowerId];
+  if (def?.comboId) {
+    const combo = COMBO_DEFS.find(c => c.id === def.comboId);
+    if (combo) return combo.color;
+  }
+  if (tower.elements.length > 0) return ELEMENT_COLOR[tower.elements[0]];
+  return '#ffffff';
 }

@@ -1,4 +1,4 @@
-import type { GameConfig, TowerType } from './types.js';
+import type { GameConfig, PvPUnitDef } from './types.js';
 
 // ── Game Config ─────────────────────────────────────────
 
@@ -6,14 +6,13 @@ export const GRID_SIZE = 16;
 export const MAX_PLAYERS = 4;
 export const MIN_PLAYERS = 1;
 export const STARTING_HP = 100;
-export const STARTING_GOLD = 50;
+export const STARTING_CREDITS = 200;
 
 export const DEFAULT_GAME_CONFIG: GameConfig = {
-  startingGold: 50,
-  startingHp: 100,
+  startingCredits: STARTING_CREDITS,
+  startingHp: STARTING_HP,
 };
 
-export const SHOP_SLOTS = 5;
 export const TOTAL_ROUNDS = 30;
 
 // ── Timing ──────────────────────────────────────────────
@@ -21,38 +20,28 @@ export const TOTAL_ROUNDS = 30;
 export const TICK_RATE = 20;
 export const TICK_MS = 1000 / TICK_RATE;
 export const MOB_SYNC_INTERVAL = 3;
-export const SHOP_PHASE_DURATION = 30;
-export const FIRST_SHOP_PHASE_DURATION = 45;
-export const AUGMENT_PICK_DURATION = 15;
+export const PREP_PHASE_DURATION = 30;
+export const FIRST_PREP_PHASE_DURATION = 45;
+export const BOSS_SELECT_DURATION = 10;
 
 // ── Economy ─────────────────────────────────────────────
 
-export const REROLL_COST = 2;
-export const BASE_INCOME = 5;
-export const INTEREST_PER_10G = 1;
-export const MAX_INTEREST = 5;
-export const CLEAN_BONUS = 3;
-export const STREAK_BONUS = [0, 0, 1, 1, 2, 2, 3];
+export const BASE_INCOME = 50; // credits per round
+export const KILL_REWARD = 2;  // credits per mob killed
+export const BOSS_KILL_REWARD = 20;
 
-// ── Tower Costs ─────────────────────────────────────────
+// ── Boss Rounds ─────────────────────────────────────────
 
-export const TOWER_COSTS: Record<string, number> = {
-  arrow: 3,
-  cannon: 5,
-  income: 7,
-  pvp: 6,
-};
+export const BOSS_ROUND_INTERVAL = 5; // every 5 rounds
+export const BOSS_DAMAGE_PER_PASS = 5; // HP damage when boss loops
+
+// ── Sell ─────────────────────────────────────────────────
 
 export const SELL_REFUND_RATIO = 0.7;
 
-// ── Tower Colors ────────────────────────────────────────
+// ── Element Tower Credit Value (for sell calculation) ───
 
-export const TOWER_COLOR_HEX: Record<TowerType, string> = {
-  arrow: '#4EA8DE',
-  cannon: '#FF6B35',
-  income: '#ffc107',
-  pvp: '#9B5DE5',
-};
+export const ELEMENT_CREDIT_VALUE = 50; // 1 element = 50 credits equivalent for sell calc
 
 // ── Player Colors ───────────────────────────────────────
 
@@ -65,12 +54,11 @@ export const PLAYER_COLOR_HEX = {
 
 // ── Mob Scaling ─────────────────────────────────────────
 
-export const MOB_BASE_HP = 50;
-export const MOB_HP_SCALE = 1.10;
+export const MOB_BASE_HP = 60;
+export const MOB_HP_SCALE = 1.12;
 export const MOB_COUNT_BASE = 5;
 export const MOB_COUNT_SCALE = 0.4;
-export const BOSS_ROUNDS = [5, 10, 15, 20, 25, 30];
-export const BOSS_HP_MULT = 5;
+export const BOSS_HP_MULT = 8;
 
 export const RUNNER_SPEED_MULT = 1.8;
 export const RUNNER_HP_MULT = 0.6;
@@ -79,25 +67,38 @@ export const TANK_HP_MULT = 2.2;
 export const SWARM_COUNT_MULT = 2.5;
 export const SWARM_HP_MULT = 0.4;
 
-// ── Kill Rewards ────────────────────────────────────────
+// ── PvP Shop Units ──────────────────────────────────────
 
-export const KILL_REWARD_TIERS = [
-  { maxRound: 15, gold: 1 },
-  { maxRound: 30, gold: 2 },
+export const PVP_UNIT_DEFS: PvPUnitDef[] = [
+  {
+    id: 'pvp_grunt',
+    name: 'Grunt',
+    cost: 50,
+    incomeBonus: 1,
+    hp_mult: 1.5,
+    speed_mult: 1.0,
+    description: 'Standard unit. +1 income/round.',
+  },
+  {
+    id: 'pvp_runner',
+    name: 'Runner',
+    cost: 75,
+    incomeBonus: 1,
+    hp_mult: 0.8,
+    speed_mult: 1.8,
+    description: 'Fast but fragile. +1 income/round.',
+  },
+  {
+    id: 'pvp_tank',
+    name: 'Tank',
+    cost: 100,
+    incomeBonus: 2,
+    hp_mult: 3.0,
+    speed_mult: 0.5,
+    description: 'Massive HP, slow. +2 income/round.',
+  },
 ];
 
-// ── PvP Points System (Feature 4) ───────────────────────
-
-export const PVP_COSTS = { basic: 3, flying: 8, boss: 10 } as const;
-export const PVP_HP_MULT = 3;          // boost over round HP for basic PvP units
-export const PVP_BOSS_HP_MULT = 10;   // boss PvP unit HP multiplier
-export const PVP_FLYING_HP_MULT = 1.5; // flying PvP unit HP multiplier
-export const PVP_FLYING_SPEED = 3;    // flying unit straight-line speed
-export const PVP_COLOR = 0x9B5DE5;    // purple color for PvP mobs
-
-/** @deprecated kept for backward compat — use PVP_COSTS instead */
-export const PVP_UNIT_DEFS = {
-  pvp_grunt: { id: 'pvp_grunt', cost: 5, hp_mult: 1.0 },
-  pvp_runner: { id: 'pvp_runner', cost: 8, hp_mult: 0.6, speed_mult: 1.8 },
-  pvp_tank: { id: 'pvp_tank', cost: 12, hp_mult: 2.2, speed_mult: 0.5 },
-} as const;
+export const PVP_UNIT_MAP: Record<string, PvPUnitDef> = Object.fromEntries(
+  PVP_UNIT_DEFS.map(u => [u.id, u])
+);

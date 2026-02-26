@@ -1,16 +1,18 @@
 import type { Element } from './elements.js';
+import type { ComboEffectType } from './combos.js';
 
 // ── Core Enums ──────────────────────────────────────────
 
-export type TowerType = 'arrow' | 'cannon' | 'income' | 'pvp';
-export const TOWER_TYPES: TowerType[] = ['arrow', 'cannon', 'income', 'pvp'];
+export type TowerType = 'blaster' | 'railgun';
+export const TOWER_TYPES: TowerType[] = ['blaster', 'railgun'];
 
-export type TowerTier = 1 | 2 | 3;
+export type BaseTowerTier = 1 | 2 | 3 | '3+';
+export type ElementTowerRank = 1 | 2 | 3; // rank 3 = pure tower
 
 export type PlayerColor = 'blue' | 'red' | 'green' | 'orange';
 export const PLAYER_COLORS: PlayerColor[] = ['blue', 'red', 'green', 'orange'];
 
-export type GamePhase = 'lobby' | 'shopping' | 'augmentPick' | 'combat' | 'gameOver';
+export type GamePhase = 'lobby' | 'prep' | 'bossSelect' | 'bossFight' | 'combat' | 'gameOver';
 
 // ── Grid ────────────────────────────────────────────────
 
@@ -19,43 +21,62 @@ export interface GridPos {
   col: number;
 }
 
-// ── Tower ───────────────────────────────────────────────
+// ── Tower Definitions ───────────────────────────────────
 
-export interface TowerDef {
+export interface BaseTowerDef {
   id: string;
   name: string;
   towerType: TowerType;
   cost: number;
-  damage: number;
-  attackSpeed: number; // attacks per second
-  range: number;       // grid cells
+  /** Stats per tier: [T1, T2, T3] */
+  tiers: {
+    damage: number;
+    attackSpeed: number;
+    range: number;
+    splashRadius?: number;
+  }[];
   description: string;
-  splashRadius?: number;
-  incomePerRound?: number;
-  mobPower?: number;
+  upgradeCosts: number[]; // cost to go T1→T2, T2→T3
+  t3PlusBonus: string; // description of T3+ element bonus
 }
 
-export interface TowerInstance {
-  instanceId: string;
-  defId: string;        // tower def id (arrow, cannon, income, pvp)
-  position: GridPos;
-  stars: TowerTier;     // 1 = base, 2 = ★★ (upgraded), 3 = ★★★
-  element?: Element;    // assigned when player picks an element augment
-  combo?: string;       // active combo ID applied to this tower
-  canUpgrade?: boolean; // server-computed: can this tower be upgraded?
+export interface ElementTowerDef {
+  id: string; // combo ID or 'MONO_<element>'
+  name: string;
+  elements: Element[]; // 1 for mono, 2 for combo
+  comboId?: string; // links to COMBO_DEFS
+  rank1Cost: Record<Element, number>; // elements needed for rank 1
+  description: string;
 }
+
+// ── Tower Instances ─────────────────────────────────────
+
+export interface BaseTowerInstance {
+  instanceId: string;
+  kind: 'base';
+  towerType: TowerType;
+  position: GridPos;
+  tier: 1 | 2 | 3;
+  t3PlusElement?: Element; // element applied to T3 tower
+  totalInvested: number; // total credits spent (for sell calc)
+}
+
+export interface ElementTowerInstance {
+  instanceId: string;
+  kind: 'element';
+  elementTowerId: string; // references ElementTowerDef.id
+  position: GridPos;
+  rank: ElementTowerRank;
+  elements: Element[]; // which elements compose this tower
+  isPure: boolean; // rank 3 pure tower
+  totalInvested: number; // total element "value" for sell calc (in credits equivalent)
+}
+
+export type TowerInstance = BaseTowerInstance | ElementTowerInstance;
 
 // ── Mob ─────────────────────────────────────────────────
 
-export type MobType = 'grunt' | 'runner' | 'tank' | 'swarm' | 'flying' | 'boss';
-
-export interface MobDef {
-  id: string;
-  type: MobType;
-  baseHp: number;
-  speed: number;
-  damage: number;
-}
+export type MobType = 'grunt' | 'runner' | 'tank' | 'swarm' | 'flying' | 'boss' | 'pvp_grunt' | 'pvp_tank' | 'pvp_runner';
 
 export interface MobEffect {
   type: 'slow' | 'poison' | 'burn' | 'freeze' | 'stun' | 'armorReduce';
@@ -73,10 +94,35 @@ export interface MobInstance {
   pathIndex: number;
   effects: MobEffect[];
   visible: boolean;
-  element?: Element;    // assigned from round 3+
-  armor?: number;       // base 0, can be reduced by dark cannon
-  isPvp?: boolean;      // PvP mob sent by opponent
-  isFlying?: boolean;   // flying PvP mob — straight line movement
+  element?: Element;
+  armor?: number;
+  isPvp?: boolean;
+  isFlying?: boolean;
+  isBoss?: boolean;
+  bossElement?: Element; // which element this boss drops
+}
+
+// ── PvP Shop ────────────────────────────────────────────
+
+export interface PvPUnitDef {
+  id: string;
+  name: string;
+  cost: number;       // credits
+  incomeBonus: number; // permanent +income per round
+  hp_mult: number;
+  speed_mult: number;
+  description: string;
+}
+
+// ── Boss Round ──────────────────────────────────────────
+
+export interface BossRoundState {
+  active: boolean;
+  element?: Element;       // chosen element
+  bossHp?: number;
+  bossMaxHp?: number;
+  passes: number;          // how many times boss looped
+  damagePerPass: number;
 }
 
 // ── Player ──────────────────────────────────────────────
@@ -86,15 +132,13 @@ export interface PlayerState {
   name: string;
   color: PlayerColor;
   hp: number;
-  gold: number;
+  credits: number;
+  income: number;          // base + pvp bonus income per round
   towers: TowerInstance[];
-  shop: (string | null)[];    // 5 shop slots, tower defIds or null
-  augments: string[];         // picked augment IDs
-  elements: Element[];        // collected element augments (ordered)
-  activeCombo?: string;       // active combo ID (e.g., 'PLASMA')
-  streak: number;
+  elementInventory: Record<Element, number>; // element resources
+  pureTowerSlot: string | null; // instanceId of active pure tower (max 1)
   alive: boolean;
-  pvpPoints: number;
+  bossState: BossRoundState;
 }
 
 // ── Map ─────────────────────────────────────────────────
@@ -117,14 +161,13 @@ export interface GameState {
   mapId: string;
   mobs: Record<string, MobInstance[]>;
   winner: string | null;
-  /** Augment choices per player during AUGMENT_PICK phase */
-  augmentChoices?: Record<string, string[]>; // playerId → augment IDs
+  isBossRound: boolean;
 }
 
 // ── Game Config (lobby settings) ────────────────────────
 
 export interface GameConfig {
-  startingGold: number;
+  startingCredits: number;
   startingHp: number;
 }
 
@@ -135,16 +178,17 @@ export type ClientMsg =
   | { type: 'JOIN_LOBBY'; name: string; roomCode?: string }
   | { type: 'SET_CONFIG'; config: Partial<GameConfig> }
   | { type: 'READY' }
-  | { type: 'BUY_AND_PLACE'; shopIndex: number; position: GridPos }
+  | { type: 'BUY_BASE_TOWER'; towerType: TowerType; position: GridPos }
+  | { type: 'UPGRADE_BASE_TOWER'; towerId: string }
+  | { type: 'APPLY_T3_ELEMENT'; towerId: string; element: Element }
+  | { type: 'BUY_ELEMENT_TOWER'; elements: Element[]; position: GridPos }
+  | { type: 'UPGRADE_ELEMENT_TOWER'; towerId: string }
   | { type: 'SELL_TOWER'; instanceId: string }
-  | { type: 'REROLL' }
-  | { type: 'PICK_AUGMENT'; augmentId: string }
-  | { type: 'UPGRADE_TOWER'; towerId: string }
+  | { type: 'SELECT_BOSS_ELEMENT'; element: Element }
+  | { type: 'BUY_PVP_UNIT'; unitId: string; targetPlayerId: string }
   | { type: 'DEV_START_COMBAT' }
   | { type: 'SET_SPEED'; speed: number }
-  | { type: 'SET_COLOR'; color: PlayerColor } // Feature 3: Lobby color picker
-  | { type: 'QUEUE_PVP_UNIT'; unitType: 'basic' | 'flying' | 'boss'; targetPlayerId: string } // Feature 4: PvP queue
-  | { type: 'APPLY_ELEMENT'; towerId: string; element?: Element; comboId?: string };
+  | { type: 'SET_COLOR'; color: PlayerColor };
 
 // Server → Client
 export type ServerMsg =
@@ -154,23 +198,22 @@ export type ServerMsg =
   | { type: 'PHASE_CHANGE'; phase: GamePhase; round: number; timer: number }
   | { type: 'SPEED_CHANGE'; speed: number }
   | { type: 'STATE_UPDATE'; state: GameState }
-  | { type: 'SHOP_UPDATE'; shop: (string | null)[]; gold: number }
   | { type: 'MOB_SYNC'; mobs: Record<string, MobInstance[]> }
-  | { type: 'TOWER_ATTACK'; playerId: string; towerId: string; targetId: string; damage: number }
   | { type: 'COMBAT_EVENTS'; playerId: string; attacks: CombatAttack[]; kills: CombatKill[]; leaks: string[] }
-  | { type: 'MOB_KILLED'; playerId: string; mobId: string; goldReward: number }
-  | { type: 'MOB_LEAKED'; playerId: string; mobId: string; damage: number; sentTo: string }
-  | { type: 'AUGMENT_CHOICES'; choices: { id: string; name: string; description: string; icon: string; tier: number }[] }
-  | { type: 'AUGMENT_PICKED'; playerId: string; augmentId: string }
-  | { type: 'TOWER_UPGRADED'; playerId: string; towerId: string; newTier: TowerTier }
-  | { type: 'COMBO_UNLOCKED'; playerId: string; comboId: string; comboName: string; comboColor: string }
+  | { type: 'MOB_LEAKED'; playerId: string; mobId: string; damage: number }
+  | { type: 'TOWER_PLACED'; playerId: string; tower: TowerInstance }
+  | { type: 'TOWER_UPGRADED'; playerId: string; towerId: string }
+  | { type: 'TOWER_SOLD'; playerId: string; towerId: string; refund: number }
+  | { type: 'BOSS_SELECT'; round: number }
+  | { type: 'BOSS_SPAWNED'; playerId: string; element: Element }
+  | { type: 'BOSS_KILLED'; playerId: string; element: Element }
+  | { type: 'BOSS_PASS'; playerId: string; damage: number; passes: number }
+  | { type: 'ELEMENT_GAINED'; playerId: string; element: Element; newCount: number }
+  | { type: 'PVP_UNIT_SENT'; fromId: string; toId: string; unitId: string }
   | { type: 'PLAYER_ELIMINATED'; playerId: string }
   | { type: 'GAME_OVER'; winnerId: string }
-  | { type: 'ERROR'; message: string }
-  | { type: 'NEXT_WAVE_INFO'; mobType: string; element?: Element; count: number; hp: number } // Feature 2: Next wave info
-  | { type: 'PVP_QUEUE_UPDATE'; queue: PvPQueueEntry[] } // Feature 4: PvP queue update
-  | { type: 'ELEMENT_APPLIED'; playerId: string; towerId: string; element?: Element; comboId?: string }
-  | { type: 'FIRST_CLEAR'; playerId: string; bonus: number };
+  | { type: 'NEXT_WAVE_INFO'; mobType: string; element?: Element; count: number; hp: number }
+  | { type: 'ERROR'; message: string };
 
 export interface CombatAttack {
   towerX: number;
@@ -196,19 +239,5 @@ export interface LobbyPlayer {
   id: string;
   name: string;
   ready: boolean;
-  color?: PlayerColor; // Feature 3: Lobby color picker
-}
-
-// ── PvP Queue (Feature 4) ───────────────────────────────
-
-export interface PvPQueueEntry {
-  unitType: string;
-  targetPlayerId: string;
-}
-
-export interface PvPUnitDef {
-  id: string;
-  cost: number;
-  hp_mult: number;
-  speed_mult?: number;
+  color?: PlayerColor;
 }
