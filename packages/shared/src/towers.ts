@@ -10,13 +10,13 @@ export const BASE_TOWER_DEFS: BaseTowerDef[] = [
     id: 'blaster',
     name: 'Blaster',
     towerType: 'blaster',
-    cost: 100,
+    cost: 50,
     tiers: [
       { damage: 10, attackSpeed: 1.25, range: 3 },          // T1
       { damage: 22, attackSpeed: 1.5, range: 3.5 },         // T2
       { damage: 40, attackSpeed: 1.8, range: 4 },           // T3
     ],
-    upgradeCosts: [150, 250], // T1→T2: 150, T2→T3: 250
+    upgradeCosts: [75, 125], // T1→T2: 75, T2→T3: 125
     description: 'Rapid fire laser shots',
     t3PlusBonus: 'Elemental shots: apply element effects on hit',
   },
@@ -24,13 +24,13 @@ export const BASE_TOWER_DEFS: BaseTowerDef[] = [
     id: 'railgun',
     name: 'Railgun',
     towerType: 'railgun',
-    cost: 150,
+    cost: 75,
     tiers: [
       { damage: 30, attackSpeed: 0.5, range: 2.5, splashRadius: 0.5 },   // T1
       { damage: 65, attackSpeed: 0.6, range: 3, splashRadius: 0.7 },     // T2
       { damage: 120, attackSpeed: 0.7, range: 3.5, splashRadius: 1.0 },  // T3
     ],
-    upgradeCosts: [200, 350], // T1→T2: 200, T2→T3: 350
+    upgradeCosts: [100, 175], // T1→T2: 100, T2→T3: 175
     description: 'Slow, massive kinetic impact with splash',
     t3PlusBonus: 'Elemental splash: element effects apply to all splashed targets',
   },

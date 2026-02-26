@@ -73,7 +73,7 @@ export const PVP_UNIT_DEFS: PvPUnitDef[] = [
   {
     id: 'pvp_grunt',
     name: 'Grunt',
-    cost: 50,
+    cost: 25,
     incomeBonus: 1,
     hp_mult: 1.5,
     speed_mult: 1.0,
@@ -82,7 +82,7 @@ export const PVP_UNIT_DEFS: PvPUnitDef[] = [
   {
     id: 'pvp_runner',
     name: 'Runner',
-    cost: 75,
+    cost: 38,
     incomeBonus: 1,
     hp_mult: 0.8,
     speed_mult: 1.8,
@@ -91,7 +91,7 @@ export const PVP_UNIT_DEFS: PvPUnitDef[] = [
   {
     id: 'pvp_tank',
     name: 'Tank',
-    cost: 100,
+    cost: 50,
     incomeBonus: 2,
     hp_mult: 3.0,
     speed_mult: 0.5,

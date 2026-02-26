@@ -321,12 +321,20 @@ export class Game {
 
       case 'BUY_PVP_UNIT': {
         if (this.state.phase !== 'prep') return;
-        const targetPlayer = this.state.players.find(p => p.id === msg.targetPlayerId && p.alive);
-        if (!targetPlayer || targetPlayer.id === playerId) return;
+        const alivePlayers = this.state.players.filter(p => p.alive && p.id !== playerId);
+        const isSolo = alivePlayers.length === 0;
+
+        if (!isSolo) {
+          const targetPlayer = this.state.players.find(p => p.id === msg.targetPlayerId && p.alive);
+          if (!targetPlayer || targetPlayer.id === playerId) return;
+        }
 
         if (this.pvpShop.buyUnit(player, msg.unitId)) {
-          this.pvpPending.push({ fromId: playerId, toId: msg.targetPlayerId, unitId: msg.unitId });
-          this.broadcast({ type: 'PVP_UNIT_SENT', fromId: playerId, toId: msg.targetPlayerId, unitId: msg.unitId });
+          if (!isSolo) {
+            this.pvpPending.push({ fromId: playerId, toId: msg.targetPlayerId, unitId: msg.unitId });
+            this.broadcast({ type: 'PVP_UNIT_SENT', fromId: playerId, toId: msg.targetPlayerId, unitId: msg.unitId });
+          }
+          // In solo: income bonus still applies, no mobs sent
           this.broadcastStateUpdate();
         }
         break;
