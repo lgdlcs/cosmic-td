@@ -352,7 +352,7 @@ export class LobbyScene extends Phaser.Scene {
     this.configSection.appendChild(heading);
 
     const settings: { key: keyof GameConfig; label: string; min: number; max: number; step: number }[] = [
-      { key: 'startingGold', label: '💰 Gold', min: 0, max: 500, step: 10 },
+      { key: 'startingCredits', label: '💰 Credits', min: 0, max: 2000, step: 50 },
       { key: 'startingHp', label: '❤️ HP', min: 1, max: 500, step: 10 },
     ];
 
