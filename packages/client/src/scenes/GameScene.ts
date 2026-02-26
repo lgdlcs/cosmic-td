@@ -26,7 +26,7 @@ import {
   getElementTowerStats,
   getTowerDisplayColor,
   getTowerSellPrice,
-  getElementUpgradeCost,
+  getElementUpgradeCreditCost,
   ELEMENT_EMOJI,
   ELEMENT_COLOR,
   ELEMENT_COLOR_HEX,
@@ -317,7 +317,7 @@ export class GameScene extends Phaser.Scene {
       const cardX = startX + i * (cardW + gap);
       const cardY = cy + 20;
       const colorHex = ELEMENT_COLOR_HEX[elem];
-      const owned = me?.elementInventory[elem] || 0;
+      const owned = me?.unlockedElements.includes(elem) ? 1 : 0;
 
       const bg = this.add.rectangle(cardX, cardY, cardW, 120, colorHex, 0.15);
       bg.setStrokeStyle(2, colorHex);
@@ -731,23 +731,21 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Place base tower
+    // Place base tower (stay in placement mode for repeated builds)
     if (this.placingTowerType) {
       if (!isPathCell(this.mapDef, pos)) {
         socket.send({ type: 'BUY_BASE_TOWER', towerType: this.placingTowerType, position: pos });
         sfx.towerPlace();
       }
-      this.cancelPlacement();
       return;
     }
 
-    // Place element tower
+    // Place element tower (stay in placement mode for repeated builds)
     if (this.placingElements) {
       if (!isPathCell(this.mapDef, pos)) {
         socket.send({ type: 'BUY_ELEMENT_TOWER', elements: this.placingElements, position: pos });
         sfx.towerPlace();
       }
-      this.cancelPlacement();
       return;
     }
 
@@ -811,7 +809,7 @@ export class GameScene extends Phaser.Scene {
         const elemY = panelY + 10;
         let btnIdx = 0;
         for (const elem of ALL_ELEMENTS) {
-          const owned = me.elementInventory[elem] || 0;
+          const owned = me.unlockedElements.includes(elem) ? 1 : 0;
           if (owned <= 0) continue;
           const bx = panelX - panelW / 2 + 10 + btnIdx * 26;
           const btn = this.add.rectangle(bx + 10, elemY, 22, 22, ELEMENT_COLOR_HEX[elem], 0.8)
@@ -832,9 +830,9 @@ export class GameScene extends Phaser.Scene {
       if (tower.rank < 3) {
         const def = ELEMENT_TOWER_MAP[tower.elementTowerId];
         if (def) {
-          const cost = getElementUpgradeCost(def, tower.rank as 1 | 2);
-          const canAfford = Object.entries(cost).every(([e, q]) => (me.elementInventory[e as Element] || 0) >= q);
-          const costStr = Object.entries(cost).filter(([, q]) => q > 0).map(([e, q]) => `${q}${ELEMENT_EMOJI[e as Element]}`).join('+');
+          const creditCost = getElementUpgradeCreditCost(def, tower.rank as 1 | 2);
+          const canAfford = creditCost > 0 && me.credits >= creditCost;
+          const costStr = creditCost > 0 ? `${creditCost}¢` : '';
 
           // For pure (rank 3), check pure slot
           const isPureUpgrade = tower.rank === 2 && def.elements.length === 1;
@@ -963,6 +961,7 @@ export class GameScene extends Phaser.Scene {
 
     BASE_TOWER_DEFS.forEach((def, i) => {
       const btn = mkDiv(root, { ...btnBase, position: 'absolute', ...pct(GRID_X + i * 140, shopY + 14), fontSize: '13px', padding: '8px', width: '130px', minHeight: '40px', background: 'rgba(13,17,23,0.9)', border: '1px solid rgba(0,212,255,0.3)', color: '#e0e8ff', textAlign: 'left', lineHeight: '1.3' });
+      btn.id = `base-tower-btn-${def.towerType}`;
       btn.innerHTML = `<span style="color:${def.towerType === 'blaster' ? '#4EA8DE' : '#FF6B35'}">■</span> ${def.name}<br><span style="color:#ffc107">${def.cost}cr</span> <span style="color:#888;font-size:10px">${def.description}</span>`;
       btn.onclick = () => {
         this.placingTowerType = def.towerType;
@@ -1026,23 +1025,29 @@ export class GameScene extends Phaser.Scene {
 
     // HUD
     if (this.hudLeft) {
-      const elemSummary = ALL_ELEMENTS.filter(e => me.elementInventory[e] > 0)
-        .map(e => `${ELEMENT_EMOJI[e]}${me.elementInventory[e]}`).join(' ');
+      const elemSummary = me.unlockedElements
+        .map(e => `${ELEMENT_EMOJI[e]}`).join(' ');
       this.hudLeft.textContent = `❤️ ${me.hp}   💰 ${me.credits}cr   📈 +${me.income}/rnd   ${elemSummary}`;
     }
     this.updatePhaseText();
+
+    // Grey out base tower buttons when can't afford
+    for (const def of BASE_TOWER_DEFS) {
+      const btn = document.getElementById(`base-tower-btn-${def.towerType}`);
+      if (btn) btn.style.opacity = me.credits >= def.cost ? '1' : '0.4';
+    }
 
     // Element panel
     const elemPanel = document.getElementById('elem-panel');
     if (elemPanel) {
       let html = '<div style="font-weight:700;color:#00d4ff;margin-bottom:4px">ELEMENTS</div>';
       for (const elem of ALL_ELEMENTS) {
-        const qty = me.elementInventory[elem] || 0;
+        const qty = me.unlockedElements.includes(elem) ? 1 : 0;
         if (qty > 0) {
-          html += `<div>${ELEMENT_EMOJI[elem]} ${elem}: <span style="color:#ffc107">${qty}</span></div>`;
+          html += `<div>${ELEMENT_EMOJI[elem]} ${elem}: <span style="color:#4ade80">✓</span></div>`;
         }
       }
-      if (Object.values(me.elementInventory).every(v => v === 0)) {
+      if (me.unlockedElements.length === 0) {
         html += '<div style="color:#666">(none — defeat bosses!)</div>';
       }
 
@@ -1051,16 +1056,22 @@ export class GameScene extends Phaser.Scene {
 
       // Mono towers
       for (const elem of ALL_ELEMENTS) {
-        if ((me.elementInventory[elem] || 0) >= 1) {
-          html += `<div class="elem-build-btn" data-elements="${elem}" style="cursor:pointer;pointer-events:auto;padding:2px 4px;margin:2px 0;border-radius:4px;background:${ELEMENT_COLOR[elem]}22;border:1px solid ${ELEMENT_COLOR[elem]}66">${ELEMENT_EMOJI[elem]} ${elem} Tower (1${ELEMENT_EMOJI[elem]})</div>`;
+        if (me.unlockedElements.includes(elem)) {
+          const def = ELEMENT_TOWER_DEFS.find(d => d.elements.length === 1 && d.elements[0] === elem);
+          const cost = def?.creditCost || 100;
+          const afford = me.credits >= cost;
+          html += `<div class="elem-build-btn" data-elements="${elem}" style="cursor:pointer;pointer-events:auto;padding:2px 4px;margin:2px 0;border-radius:4px;background:${ELEMENT_COLOR[elem]}22;border:1px solid ${ELEMENT_COLOR[elem]}66;opacity:${afford ? '1' : '0.5'}">${ELEMENT_EMOJI[elem]} ${elem} Tower (${cost}¢)</div>`;
         }
       }
 
       // Combo towers
       for (const combo of COMBO_DEFS) {
         const [e1, e2] = combo.elements;
-        if ((me.elementInventory[e1] || 0) >= 1 && (me.elementInventory[e2] || 0) >= 1) {
-          html += `<div class="elem-build-btn" data-elements="${e1},${e2}" style="cursor:pointer;pointer-events:auto;padding:2px 4px;margin:2px 0;border-radius:4px;background:${combo.color}22;border:1px solid ${combo.color}66">${ELEMENT_EMOJI[e1]}+${ELEMENT_EMOJI[e2]} ${combo.name} (1${ELEMENT_EMOJI[e1]}+1${ELEMENT_EMOJI[e2]})</div>`;
+        if (me.unlockedElements.includes(e1) && me.unlockedElements.includes(e2)) {
+          const def = ELEMENT_TOWER_DEFS.find(d => d.comboId === combo.id);
+          const cost = def?.creditCost || 150;
+          const afford = me.credits >= cost;
+          html += `<div class="elem-build-btn" data-elements="${e1},${e2}" style="cursor:pointer;pointer-events:auto;padding:2px 4px;margin:2px 0;border-radius:4px;background:${combo.color}22;border:1px solid ${combo.color}66;opacity:${afford ? '1' : '0.5'}">${ELEMENT_EMOJI[e1]}+${ELEMENT_EMOJI[e2]} ${combo.name} (${cost}¢)</div>`;
         }
       }
 
@@ -1170,7 +1181,7 @@ export class GameScene extends Phaser.Scene {
     overlay.appendChild(elemRow);
 
     ALL_ELEMENTS.forEach(elem => {
-      const owned = me?.elementInventory[elem] || 0;
+      const owned = me?.unlockedElements.includes(elem) ? 1 : 0;
       const node = document.createElement('div');
       Object.assign(node.style, { width: '80px', textAlign: 'center', padding: '8px 4px', borderRadius: '8px', border: `2px solid ${owned > 0 ? ELEMENT_COLOR[elem] : '#333'}`, background: owned > 0 ? 'rgba(255,255,255,0.08)' : 'rgba(30,30,40,0.8)', opacity: owned > 0 ? '1' : '0.4' });
       node.innerHTML = `<div style="font-size:24px">${ELEMENT_EMOJI[elem]}</div><div style="font-size:11px;font-weight:bold;color:${ELEMENT_COLOR[elem]};margin-top:2px">${elem.toUpperCase()}</div><div style="font-size:10px;color:#ffc107">${owned > 0 ? `×${owned}` : ''}</div>`;
@@ -1187,8 +1198,8 @@ export class GameScene extends Phaser.Scene {
     treeArea.appendChild(row);
 
     COMBO_DEFS.forEach(combo => {
-      const hasE1 = (me?.elementInventory[combo.elements[0]] || 0) > 0;
-      const hasE2 = (me?.elementInventory[combo.elements[1]] || 0) > 0;
+      const hasE1 = me?.unlockedElements.includes(combo.elements[0]);
+      const hasE2 = me?.unlockedElements.includes(combo.elements[1]);
       const unlocked = hasE1 && hasE2;
       const partial = hasE1 || hasE2;
 

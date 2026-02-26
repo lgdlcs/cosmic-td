@@ -52,6 +52,7 @@ function buildElementTowerDefs(): ElementTowerDef[] {
       name: `${elem.charAt(0).toUpperCase() + elem.slice(1)} Tower`,
       elements: [elem],
       rank1Cost: { [elem]: 1 } as Record<Element, number>,
+      creditCost: 100,
       description: `Pure ${elem} element tower`,
     });
   }
@@ -67,6 +68,7 @@ function buildElementTowerDefs(): ElementTowerDef[] {
       elements: [...combo.elements],
       comboId: combo.id,
       rank1Cost: cost,
+      creditCost: 150,
       description: combo.description,
     });
   }
@@ -133,26 +135,22 @@ export function getElementTowerStats(def: ElementTowerDef, rank: 1 | 2 | 3): Tow
   };
 }
 
-/** Get the cost to upgrade an element tower to the next rank */
-export function getElementUpgradeCost(def: ElementTowerDef, currentRank: 1 | 2): Record<Element, number> {
-  const cost: Record<Element, number> = {} as Record<Element, number>;
-  const nextRank = currentRank + 1;
-
-  if (nextRank === 2) {
-    // Rank 2 = 2x each element
-    for (const elem of def.elements) {
-      cost[elem] = (cost[elem] || 0) + 2;
-    }
-  } else if (nextRank === 3) {
-    // Rank 3 (pure) = 3x of ONE element (must be mono-element tower)
-    if (def.elements.length !== 1) {
-      // Can't go pure on combo towers
-      return cost;
-    }
-    cost[def.elements[0]] = 3;
+/** Get the credit cost to upgrade an element tower to the next rank */
+export function getElementUpgradeCreditCost(def: ElementTowerDef, currentRank: 1 | 2): number {
+  if (currentRank === 1) {
+    // Rank 1→2: 1.5x base cost
+    return Math.round(def.creditCost * 1.5);
+  } else if (currentRank === 2) {
+    // Rank 2→3 (pure): 2.5x base cost, mono only
+    if (def.elements.length !== 1) return 0;
+    return Math.round(def.creditCost * 2.5);
   }
+  return 0;
+}
 
-  return cost;
+/** @deprecated use getElementUpgradeCreditCost */
+export function getElementUpgradeCost(def: ElementTowerDef, currentRank: 1 | 2): Record<Element, number> {
+  return {} as Record<Element, number>;
 }
 
 // ── Sell Price ───────────────────────────────────────────

@@ -45,7 +45,8 @@ export interface ElementTowerDef {
   name: string;
   elements: Element[]; // 1 for mono, 2 for combo
   comboId?: string; // links to COMBO_DEFS
-  rank1Cost: Record<Element, number>; // elements needed for rank 1
+  rank1Cost: Record<Element, number>; // elements needed for rank 1 (legacy, unused)
+  creditCost: number; // credit cost to build
   description: string;
 }
 
@@ -135,7 +136,7 @@ export interface PlayerState {
   credits: number;
   income: number;          // base + pvp bonus income per round
   towers: TowerInstance[];
-  elementInventory: Record<Element, number>; // element resources
+  unlockedElements: Element[]; // elements unlocked (can build unlimited towers)
   pureTowerSlot: string | null; // instanceId of active pure tower (max 1)
   alive: boolean;
   bossState: BossRoundState;

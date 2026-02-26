@@ -31,12 +31,11 @@ import {
   MOB_SYNC_INTERVAL,
   BASE_INCOME,
   KILL_REWARD,
-  ELEMENT_CREDIT_VALUE,
   SELL_REFUND_RATIO,
   BASE_TOWER_MAP,
   ELEMENT_TOWER_MAP,
   ELEMENT_TOWER_DEFS,
-  getElementUpgradeCost,
+  getElementUpgradeCreditCost,
   getTowerSellPrice,
   isPathCell,
   ALL_ELEMENTS,
@@ -49,11 +48,7 @@ import { CombatManager } from './combat.js';
 import { EconomyManager } from './economy.js';
 import { rooms } from './lobby.js';
 
-function emptyElementInventory(): Record<Element, number> {
-  const inv: Record<string, number> = {};
-  for (const e of ALL_ELEMENTS) inv[e] = 0;
-  return inv as Record<Element, number>;
-}
+// No longer needed — elements are unlocked, not counted
 
 function emptyBossState(): BossRoundState {
   return { active: false, passes: 0, damagePerPass: BOSS_DAMAGE_PER_PASS };
@@ -96,7 +91,7 @@ export class Game {
       credits: config.startingCredits,
       income: BASE_INCOME,
       towers: [],
-      elementInventory: emptyElementInventory(),
+      unlockedElements: [],
       pureTowerSlot: null,
       alive: true,
       bossState: emptyBossState(),
@@ -130,7 +125,7 @@ export class Game {
 
     switch (msg.type) {
       case 'BUY_BASE_TOWER': {
-        if (this.state.phase !== 'prep') return;
+        if (this.state.phase === 'lobby' || this.state.phase === 'gameOver') return;
         const def = BASE_TOWER_MAP[msg.towerType];
         if (!def) return;
         if (!this.isValidPlacement(player, msg.position)) return;
@@ -152,7 +147,7 @@ export class Game {
       }
 
       case 'UPGRADE_BASE_TOWER': {
-        if (this.state.phase !== 'prep') return;
+        if (this.state.phase === 'lobby' || this.state.phase === 'gameOver') return;
         const tower = player.towers.find(t => t.instanceId === msg.towerId);
         if (!tower || tower.kind !== 'base') return;
         const baseTower = tower as BaseTowerInstance;
@@ -172,24 +167,22 @@ export class Game {
       }
 
       case 'APPLY_T3_ELEMENT': {
-        if (this.state.phase !== 'prep') return;
+        if (this.state.phase === 'lobby' || this.state.phase === 'gameOver') return;
         const tower = player.towers.find(t => t.instanceId === msg.towerId);
         if (!tower || tower.kind !== 'base') return;
         const baseTower = tower as BaseTowerInstance;
         if (baseTower.tier !== 3) return;
         if (baseTower.t3PlusElement) return; // already has element
 
-        // Spend 1 element from inventory
-        if ((player.elementInventory[msg.element] || 0) < 1) return;
-        player.elementInventory[msg.element]--;
+        // Check element is unlocked
+        if (!player.unlockedElements.includes(msg.element)) return;
         baseTower.t3PlusElement = msg.element;
-        baseTower.totalInvested += ELEMENT_CREDIT_VALUE;
         this.broadcastStateUpdate();
         break;
       }
 
       case 'BUY_ELEMENT_TOWER': {
-        if (this.state.phase !== 'prep') return;
+        if (this.state.phase === 'lobby' || this.state.phase === 'gameOver') return;
         if (!this.isValidPlacement(player, msg.position)) return;
 
         // Find matching element tower def
@@ -204,16 +197,14 @@ export class Game {
         }
         if (!etDef) return;
 
-        // Check element inventory
-        const cost = etDef.rank1Cost;
-        for (const [elem, qty] of Object.entries(cost)) {
-          if ((player.elementInventory[elem as Element] || 0) < qty) return;
+        // Check all required elements are unlocked
+        for (const elem of etDef.elements) {
+          if (!player.unlockedElements.includes(elem)) return;
         }
 
-        // Spend elements
-        for (const [elem, qty] of Object.entries(cost)) {
-          player.elementInventory[elem as Element] -= qty;
-        }
+        // Pay credits
+        if (player.credits < etDef.creditCost) return;
+        player.credits -= etDef.creditCost;
 
         const tower: ElementTowerInstance = {
           instanceId: nanoid(8),
@@ -223,7 +214,7 @@ export class Game {
           rank: 1,
           elements: [...msg.elements],
           isPure: false,
-          totalInvested: Object.values(cost).reduce((a, b) => a + b, 0) * ELEMENT_CREDIT_VALUE,
+          totalInvested: etDef.creditCost,
         };
         player.towers.push(tower);
         this.broadcast({ type: 'TOWER_PLACED', playerId, tower });
@@ -232,7 +223,7 @@ export class Game {
       }
 
       case 'UPGRADE_ELEMENT_TOWER': {
-        if (this.state.phase !== 'prep') return;
+        if (this.state.phase === 'lobby' || this.state.phase === 'gameOver') return;
         const tower = player.towers.find(t => t.instanceId === msg.towerId);
         if (!tower || tower.kind !== 'element') return;
         const elemTower = tower as ElementTowerInstance;
@@ -242,32 +233,20 @@ export class Game {
         if (!etDef) return;
 
         if (elemTower.rank === 1) {
-          // Rank 1→2: 2x each element
-          const cost = getElementUpgradeCost(etDef, 1);
-          for (const [elem, qty] of Object.entries(cost)) {
-            if ((player.elementInventory[elem as Element] || 0) < qty) return;
-          }
-          for (const [elem, qty] of Object.entries(cost)) {
-            player.elementInventory[elem as Element] -= qty;
-          }
+          const cost = getElementUpgradeCreditCost(etDef, 1);
+          if (cost <= 0 || player.credits < cost) return;
+          player.credits -= cost;
           elemTower.rank = 2;
-          elemTower.totalInvested += Object.values(cost).reduce((a, b) => a + b, 0) * ELEMENT_CREDIT_VALUE;
+          elemTower.totalInvested += cost;
         } else if (elemTower.rank === 2) {
-          // Rank 2→3 (pure): must be mono-element, 3x of that element
           if (etDef.elements.length !== 1) return; // only mono can go pure
           if (player.pureTowerSlot !== null) return; // only 1 pure at a time
-
-          const cost = getElementUpgradeCost(etDef, 2);
-          if (Object.keys(cost).length === 0) return;
-          for (const [elem, qty] of Object.entries(cost)) {
-            if ((player.elementInventory[elem as Element] || 0) < qty) return;
-          }
-          for (const [elem, qty] of Object.entries(cost)) {
-            player.elementInventory[elem as Element] -= qty;
-          }
+          const cost = getElementUpgradeCreditCost(etDef, 2);
+          if (cost <= 0 || player.credits < cost) return;
+          player.credits -= cost;
           elemTower.rank = 3;
           elemTower.isPure = true;
-          elemTower.totalInvested += Object.values(cost).reduce((a, b) => a + b, 0) * ELEMENT_CREDIT_VALUE;
+          elemTower.totalInvested += cost;
           player.pureTowerSlot = elemTower.instanceId;
         }
 
@@ -320,7 +299,7 @@ export class Game {
       }
 
       case 'BUY_PVP_UNIT': {
-        if (this.state.phase !== 'prep') return;
+        if (this.state.phase === 'lobby' || this.state.phase === 'gameOver') return;
         const alivePlayers = this.state.players.filter(p => p.alive && p.id !== playerId);
         const isSolo = alivePlayers.length === 0;
 
@@ -517,10 +496,12 @@ export class Game {
       result.killed.forEach(mob => {
         if (mob.isBoss && mob.bossElement) {
           const elem = mob.bossElement;
-          p.elementInventory[elem] = (p.elementInventory[elem] || 0) + 1;
+          if (!p.unlockedElements.includes(elem)) {
+            p.unlockedElements.push(elem);
+          }
           p.credits += this.economy.bossKillReward();
           this.broadcast({ type: 'BOSS_KILLED', playerId: p.id, element: elem });
-          this.broadcast({ type: 'ELEMENT_GAINED', playerId: p.id, element: elem, newCount: p.elementInventory[elem] });
+          this.broadcast({ type: 'ELEMENT_GAINED', playerId: p.id, element: elem, newCount: 1 });
         }
       });
 
